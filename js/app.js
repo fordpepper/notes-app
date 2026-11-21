@@ -106,7 +106,7 @@ function renderTree() {
     }
     for (const f of n.files.sort((a, b) => U.naturalCmp(a.path, b.path))) frag.append(row({ type: 'file', path: f.path, depth, name: displayName(f.path), ico: fileIcon(f.path), active: f.path === S.current }));
   };
-  walk(M.buildTree(), 0);
+  walk(M.buildTree(prefs.hidden), 0);
   if (!frag.querySelector('.row')) {
     const msg = !G.configured() ? 'No notes yet. Create one, or connect GitHub in Settings to load your repo.'
       : G.status.state === 'syncing' ? (G.status.msg || 'Syncing your notes…') : 'No notes yet. Tap “New note” to start.';
@@ -162,7 +162,7 @@ function bindPullToRefresh(el, ptr, onRefresh) {
 function renderSearch(el) {
   const q = S.q.toLowerCase(), hits = [];
   for (const r of M.files.values()) {
-    if (r.deleted || U.isHidden(r.path)) continue;
+    if (r.deleted || (!prefs.hidden && U.isHidden(r.path))) continue;
     const nameHit = r.path.toLowerCase().includes(q);
     let snip = '';
     if (typeof r.content === 'string') {
@@ -640,6 +640,7 @@ const settingsCtx = {
   onConnected: () => { renderStatus(); schedulePoll(); $('#emptyConnect').hidden = true; },
   onPollChanged: schedulePoll,
   onFilesChanged: () => schedulePrefetch(300),
+  onHiddenChanged: () => renderTree(),
 };
 function toggleFocus() {
   const on = document.body.classList.toggle('focus');

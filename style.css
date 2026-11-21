@@ -88,14 +88,15 @@ body.dragging .row > * { pointer-events: none; }
 .hit b { display: block; font-weight: 600; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hit small { display: block; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .hit mark { background: color-mix(in srgb, var(--primary) 22%, transparent); color: inherit; border-radius: 3px; }
-#foot { display: flex; align-items: center; gap: 0; padding: 4px 6px 4px 14px; padding-bottom: calc(4px + env(safe-area-inset-bottom)); min-height: 44px; border-top: 1px solid var(--line); }
-#status { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); cursor: pointer; min-height: 32px; }
+#foot { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px 4px 14px; padding-bottom: calc(4px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+.foot-btns { display: flex; justify-content: space-between; margin-left: -6px; }
+#status { display: flex; align-items: center; gap: 8px; font-size: 12.5px; line-height: 1.3; color: var(--muted); cursor: pointer; padding: 2px 0; }
 #status .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--outline); flex: none; }
 #status[data-s=idle] .dot { background: var(--primary); }
 #status[data-s=pending] .dot { background: var(--warn); }
 #status[data-s=error] .dot { background: var(--error); }
 #status[data-s=syncing] .dot { background: var(--primary); animation: pulse 1s infinite; }
-#status span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#status span { overflow-wrap: anywhere; }
 @keyframes pulse { 50% { opacity: .25; } }
 #ptr { position: absolute; left: 50%; top: 80px; width: 36px; height: 36px; margin-left: -18px; border-radius: 50%; background: var(--surface); box-shadow: var(--e2); display: grid; place-items: center; color: var(--muted); pointer-events: none; z-index: 5; opacity: 0; transform: translateY(calc(var(--p, 0) * 1px - 52px)); }
 #ptr svg { width: 20px; height: 20px; transform: rotate(calc(var(--p, 0) * 5deg)); }
@@ -136,8 +137,9 @@ body[data-sync=syncing] #progress { opacity: 1; }
 #preview.pv { padding: 8px 24px 120px; }
 #preview.pv.html { padding: 0; } #preview.pv.html .htmlview { width: 100%; height: 100%; border: 0; background: #fff; display: block; }
 #viewer { overflow: auto; padding: 8px 24px 48px; display: flex; flex-direction: column; align-items: center; gap: 20px; }
-#viewer img, #viewer video { max-width: 100%; max-height: 74dvh; border-radius: var(--r-s); cursor: zoom-in; }
-#viewer video { cursor: auto; background: #000; }
+#viewer > img, #viewer > video { max-width: 100%; max-height: 74dvh; border-radius: var(--r-s); cursor: zoom-in; }   /* only the picture viewer itself: slides and documents must keep their own sizes */
+#viewer > video { cursor: auto; background: #000; }
+#viewer img[data-path] { cursor: zoom-in; }
 #viewer iframe { width: 100%; flex: 1; min-height: 60vh; border: 0; border-radius: var(--r-s); background: #fff; }
 #viewer audio { width: min(520px, 100%); }
 #viewer .docview { width: 100%; max-width: 1100px; }
@@ -349,29 +351,45 @@ table.xl thead th { top: 0; } table.xl th.rowh { left: 0; } table.xl thead th.co
 table.xl td .xwrap { overflow: hidden; line-height: 1.25; }
 table.xl td .xrot { line-height: 1.2; white-space: nowrap; }
 
-/* ---- All files (tree of the whole repo) ---- */
-dialog.modal.alltree { width: min(640px, calc(100vw - 24px)); }
+/* ---- All files: a real tree with branch lines ---- */
+dialog.modal.alltree { width: min(680px, calc(100vw - 24px)); }
 dialog.modal.alltree .mbody { max-height: calc(100dvh - 110px); grid-template-rows: auto auto auto 1fr; }
 .tstats { margin: -8px 0 0; }
 .ttools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .ttools input { flex: 1; min-width: 140px; height: 36px; border: 0; border-radius: var(--r-s); background: var(--hover); padding: 0 12px; outline: none; font-size: 14.5px; }
 .ttools input:focus { box-shadow: inset 0 0 0 1px var(--primary); background: transparent; }
-.tlist { overflow: auto; min-height: 120px; margin: 0 -8px; padding: 0 8px; }
-.trow { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 2px 6px 2px calc(6px + var(--d, 0) * 18px); border-radius: var(--r-s); cursor: pointer; font-size: 14.5px; }
-.trow:hover { background: var(--hover); }
-.trow .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.trow .meta { color: var(--muted); font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.trow .fi { width: 18px; height: 18px; color: var(--muted); } .trow.dir .fi { color: var(--primary); }
-.trow .chev { width: 16px; height: 16px; color: var(--muted); transition: transform .15s; margin: 0 -2px; } .trow.open .chev { transform: rotate(90deg); }
-.trow .sp { width: 12px; flex: none; }
-.trow.file.remote .name, .trow.file.remote .fi { opacity: .6; }
-.trow .st { width: 16px; height: 16px; flex: none; } .trow .cloud { color: var(--muted); }
-.trow.active { background: var(--primary-container); color: var(--on-primary-container); }
-.imgask { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 16px; margin: .5em 0; border-radius: var(--r-s); background: var(--hover); color: var(--on-surface); font-size: 14px; font-weight: 500; }
-.imgask:hover { background: var(--line); } .imgask svg { width: 18px; height: 18px; color: var(--primary); }
+.tlist { overflow: auto; min-height: 120px; padding: 4px 0 8px; }
+.ttree, .ttree ul { list-style: none; margin: 0; padding: 0; }
+.ttree ul { margin-left: 13px; padding-left: 16px; }
+.ttree li { position: relative; }
+.ttree ul > li::before { content: ""; position: absolute; left: -16px; top: 0; height: 16px; width: 14px; border-left: 1.5px solid var(--outline-variant); border-bottom: 1.5px solid var(--outline-variant); border-radius: 0 0 0 6px; }
+.ttree ul > li:not(:last-child)::before { border-left: 0; border-radius: 0; }
+.ttree ul > li:not(:last-child)::after { content: ""; position: absolute; left: -16px; top: 0; bottom: 0; border-left: 1.5px solid var(--outline-variant); }
+.tn { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 8px; border-radius: var(--r-s); cursor: pointer; font-size: 14.5px; }
+.tn:hover { background: var(--hover); }
+.tn .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tn .meta { color: var(--muted); font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tn .fi { width: 18px; height: 18px; color: var(--muted); flex: none; }
+.ttree li.dir > .tn .fi, .ttree li.root > .tn .fi { color: var(--primary); }
+.tn.rootrow { cursor: default; font-weight: 600; } .tn.rootrow:hover { background: none; }
+.ttree li.dir:not(.open) > .tn .name::after { content: " ›"; color: var(--muted); }
+.ttree li.file.remote .name, .ttree li.file.remote .fi { opacity: .6; }
+.tn .st { width: 16px; height: 16px; flex: none; } .tn .cloud { color: var(--muted); }
+.ttree li.active > .tn { background: var(--primary-container); color: var(--on-primary-container); }
 
-/* ---- OpenDocument text ---- */
-.odtview { --fit: 1; display: flex; justify-content: center; overflow: hidden; }
-.odtpage { background: #fff; color: #000; box-shadow: var(--e2); box-sizing: border-box; font: 16px/1.4 "Liberation Serif", "Times New Roman", Times, serif; zoom: var(--fit); flex: none; overflow-wrap: break-word; }
-.odtpage td { border: 0; }
-.docxview section.docx > article { position: relative; }   /* text boxes are positioned from the text area, like in Word */
+/* ---- Office fonts: when a document names a font this device doesn't have, use the closest one that is installed ---- */
+@font-face { font-family: "Arial Narrow"; font-weight: 400; src: local("Arial Narrow"), local("ArialNarrow"), local("Liberation Sans Narrow"), local("LiberationSansNarrow"), local("Nimbus Sans Narrow"), local("NimbusSanL-ReguCond"), local("Roboto Condensed"), local("RobotoCondensed-Regular"), local("Helvetica Neue Condensed"); }
+@font-face { font-family: "Arial Narrow"; font-weight: 700; src: local("Arial Narrow Bold"), local("ArialNarrow-Bold"), local("Liberation Sans Narrow Bold"), local("LiberationSansNarrow-Bold"), local("Nimbus Sans Narrow Bold"), local("NimbusSanL-BoldCond"), local("Roboto Condensed Bold"), local("RobotoCondensed-Bold"); }
+@font-face { font-family: "Arial"; font-weight: 400; font-style: normal; src: local("Arial"), local("ArialMT"), local("Liberation Sans"), local("LiberationSans"), local("Arimo"), local("Nimbus Sans"), local("NimbusSanL-Regu"), local("Helvetica"), local("Roboto"); }
+@font-face { font-family: "Arial"; font-weight: 700; font-style: normal; src: local("Arial Bold"), local("Arial-BoldMT"), local("Liberation Sans Bold"), local("LiberationSans-Bold"), local("Arimo Bold"), local("Nimbus Sans Bold"), local("NimbusSanL-Bold"), local("Helvetica Bold"), local("Roboto Bold"); }
+@font-face { font-family: "Arial"; font-weight: 400; font-style: italic; src: local("Arial Italic"), local("Arial-ItalicMT"), local("Liberation Sans Italic"), local("LiberationSans-Italic"), local("Arimo Italic"), local("Nimbus Sans Italic"), local("Roboto Italic"); }
+@font-face { font-family: "Arial"; font-weight: 700; font-style: italic; src: local("Arial Bold Italic"), local("Arial-BoldItalicMT"), local("Liberation Sans Bold Italic"), local("LiberationSans-BoldItalic"), local("Arimo Bold Italic"), local("Nimbus Sans Bold Italic"), local("Roboto Bold Italic"); }
+@font-face { font-family: "Calibri"; font-weight: 400; src: local("Calibri"), local("Carlito"), local("Carlito Regular"); }
+@font-face { font-family: "Calibri"; font-weight: 700; src: local("Calibri Bold"), local("Calibri-Bold"), local("Carlito Bold"), local("Carlito-Bold"); }
+@font-face { font-family: "Calibri Light"; font-weight: 400; src: local("Calibri Light"), local("Carlito"); }
+@font-face { font-family: "Cambria"; font-weight: 400; src: local("Cambria"), local("Caladea"), local("Caladea Regular"); }
+@font-face { font-family: "Cambria"; font-weight: 700; src: local("Cambria Bold"), local("Caladea Bold"), local("Caladea-Bold"); }
+@font-face { font-family: "Times New Roman"; font-weight: 400; src: local("Times New Roman"), local("TimesNewRomanPSMT"), local("Liberation Serif"), local("LiberationSerif"), local("Tinos"), local("Nimbus Roman"), local("Noto Serif"); }
+@font-face { font-family: "Times New Roman"; font-weight: 700; src: local("Times New Roman Bold"), local("TimesNewRomanPS-BoldMT"), local("Liberation Serif Bold"), local("LiberationSerif-Bold"), local("Tinos Bold"), local("Nimbus Roman Bold"), local("Noto Serif Bold"); }
+@font-face { font-family: "Courier New"; font-weight: 400; src: local("Courier New"), local("CourierNewPSMT"), local("Liberation Mono"), local("LiberationMono"), local("Cousine"), local("Nimbus Mono PS"), local("Noto Sans Mono"); }
+@font-face { font-family: "Georgia"; font-weight: 400; src: local("Georgia"), local("Gelasio"), local("DejaVu Serif"), local("Noto Serif"); }

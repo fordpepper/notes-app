@@ -149,20 +149,20 @@ async function remapPins(from, to) {
 }
 
 // ---- folder tree for the sidebar ----
-export function buildTree() {
+export function buildTree(showHidden = false) {
   const root = { name: '', path: '', dirs: new Map(), files: [] };
   for (const r of files.values()) {
     if (r.deleted) continue;
     const parts = r.path.split('/');
     let n = root;
     for (let i = 0; i < parts.length - 1 && n; i++) {
-      if (parts[i].startsWith('.')) { n = null; break; }
+      if (!showHidden && parts[i].startsWith('.')) { n = null; break; }
       let d = n.dirs.get(parts[i]);
       if (!d) { d = { name: parts[i], path: join(n.path, parts[i]), dirs: new Map(), files: [] }; n.dirs.set(parts[i], d); }
       n = d;
     }
     const name = parts[parts.length - 1];
-    if (n && !name.startsWith('.')) n.files.push(r);
+    if (n && (showHidden || !name.startsWith('.'))) n.files.push(r);
   }
   return root;
 }

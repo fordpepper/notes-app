@@ -49,7 +49,7 @@ const local = (p, name) => p.evaluate(async n => (await import('/js/model.js')).
   await until(p, async () => { const M = await import('/js/model.js'); return [...M.files.values()].every(r => r.content != null); });
   ok('wifi: files that were never opened are downloaded automatically', await local(p, 'pic.png') && await local(p, 'data.bin'));
   await p.click('#btnTree'); await p.waitForSelector('dialog.alltree');
-  ok('wifi: tree shows nothing left to download', await p.locator('dialog.alltree .trow.file.remote').count() === 0);
+  ok('wifi: tree shows nothing left to download', await p.locator('dialog.alltree li.file.remote').count() === 0);
   ok('wifi: no errors', errors.length === 0, errors.join('|')); await ctx.close();
 }
 // 2. Mobile data: nothing downloads, opening asks

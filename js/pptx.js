@@ -322,7 +322,7 @@ function lineStyle(spPr, style, ctx) {
 function fontFamily(name, ctx) {
   if (!name) return null;
   if (name === '+mj-lt') name = ctx.theme.fonts.major; else if (name === '+mn-lt') name = ctx.theme.fonts.minor;
-  return `"${name}", ${/calibri/i.test(name) ? 'Carlito, ' : ''}${/cambria/i.test(name) ? 'Caladea, ' : ''}Arial, "Noto Sans", sans-serif`;
+  return `"${name}", ${/narrow|condensed/i.test(name) ? 'sans-serif-condensed, "Roboto Condensed", ' : ''}${/calibri/i.test(name) ? 'Carlito, ' : ''}${/cambria|times|georgia|garamond|serif/i.test(name) && !/sans/i.test(name) ? 'Caladea, "Liberation Serif", serif' : 'Arial, "Noto Sans", sans-serif'}`;
 }
 function textBody(tx, ctx, sc, opt) {
   const { lists, phColor, fontRefColor, box, cell } = opt;

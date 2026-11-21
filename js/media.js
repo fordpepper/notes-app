@@ -4,7 +4,7 @@
 import * as M from './model.js';
 import { sniff } from './util.js';
 
-const MAX = 1280, MIN_BYTES = 120 * 1024, CACHE = 'notes-thumbs-v1';
+const MAX = 1080, MIN_BYTES = 100 * 1024, CACHE = 'notes-thumbs-v1';
 const RASTER = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/avif', 'image/bmp']);
 
 const urlCache = new Map();
@@ -75,7 +75,7 @@ async function make(blob) {
   const cv = typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(bmp.width, bmp.height) : Object.assign(document.createElement('canvas'), { width: bmp.width, height: bmp.height });
   cv.getContext('2d').drawImage(bmp, 0, 0); bmp.close();
   const enc = (type, q) => cv.convertToBlob ? cv.convertToBlob({ type, quality: q }) : new Promise(r => cv.toBlob(r, type, q));
-  let out = await enc('image/webp', .82);
+  let out = await enc('image/webp', .78);
   if (out && out.type !== 'image/webp' && mime === 'image/jpeg') out = await enc('image/jpeg', .85);
   return out && out.size < blob.size * .9 ? out : null;
 }

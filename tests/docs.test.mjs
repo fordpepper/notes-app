@@ -50,7 +50,7 @@ gh.seed({
   'data.csv': 'name,qty,price\n"Smith, J",3,4.50\nDoe,10,"1,200"\n', 'config.json': '{"name":"notes","list":[1,2,{"deep":true}],"empty":[],"nested":{"a":null,"b":"text"}}',
   'bad.json': '{"oops": }', 'script.py': '# comment\ndef greet(name):\n    return "hi " + name  # trailing\nprint(greet("x"), 42)\n', 'page.html': '<h1 id="x">Hello page</h1>',
   'Guide.md': '# Guide\n\n```js\nconst a = "str"; // note\nfunction f() { return 1 }\n```\n',
-  'report.docx': fs.readFileSync(path.join(HERE, 'fixtures/report.docx')), 'budget.xlsx': fs.readFileSync(path.join(HERE, 'fixtures/budget.xlsx')), 'deck.pptx': fs.readFileSync(path.join(HERE, 'fixtures/deck.pptx')), 'doc.pdf': fs.readFileSync(path.join(HERE, 'fixtures/doc.pdf')), 'report.odt': fs.readFileSync(path.join(HERE, 'fixtures/report.odt')), 'budget.ods': fs.readFileSync(path.join(HERE, 'fixtures/budget.ods')), 'deck.odp': fs.readFileSync(path.join(HERE, 'fixtures/deck.odp')), 'edge.pdf': fs.readFileSync(path.join(HERE, 'fixtures/edge.pdf')), 'bundle.zip': arch, 'noext-table': Buffer.from('plain text file\n'),
+  'report.docx': fs.readFileSync(path.join(HERE, 'fixtures/report.docx')), 'budget.xlsx': fs.readFileSync(path.join(HERE, 'fixtures/budget.xlsx')), 'deck.pptx': fs.readFileSync(path.join(HERE, 'fixtures/deck.pptx')), 'doc.pdf': fs.readFileSync(path.join(HERE, 'fixtures/doc.pdf')), '.secret': 'hidden note', 'report.odt': fs.readFileSync(path.join(HERE, 'fixtures/report.odt')), 'budget.ods': fs.readFileSync(path.join(HERE, 'fixtures/budget.ods')), 'deck.odp': fs.readFileSync(path.join(HERE, 'fixtures/deck.odp')), 'edge.pdf': fs.readFileSync(path.join(HERE, 'fixtures/edge.pdf')), 'bundle.zip': arch, 'noext-table': Buffer.from('plain text file\n'),
 });
 let fails = 0; const errors = [];
 const ok = (name, c, extra) => { console.log((c ? 'PASS ' : 'FAIL ') + name + (!c && extra ? '  ' + extra : '')); if (!c) fails++; };
@@ -107,6 +107,7 @@ await open('deck.pptx'); await p.waitForSelector('#viewer .pptxslide', { timeout
 await p.waitForFunction(() => document.querySelectorAll('#viewer .pptxslide').length === 2 && /Custom text box/.test(document.querySelector('#viewer').innerText), null, { timeout: 15000 });
 const px = await p.evaluate(() => { const v = document.querySelector('#viewer'), sl = v.querySelectorAll('.pptxslide'); const box = [...v.querySelectorAll('.ps svg path')].find(x => /rgb\(224,69,123\)/.test(x.getAttribute('fill') || '')); const bg = getComputedStyle(sl[0]).backgroundColor; return { text: v.innerText, imgs: v.querySelectorAll('.ppic img').length, pink: !!box, bg, shape: box && Math.round(box.ownerSVGElement.getBoundingClientRect().width) }; });
 ok('pptx: slides keep background, shapes, picture and text', /Launch plan/.test(px.text) && /Design/.test(px.text) && /Custom text box/.test(px.text) && px.imgs >= 1 && px.pink && px.bg === 'rgb(18, 58, 92)' && px.shape > 100, JSON.stringify(px));
+ok('pptx: slide pictures are not clamped by the viewer rules (no squishing)', await p.evaluate(() => [...document.querySelectorAll('#viewer .ppic img')].every(i => getComputedStyle(i).maxHeight === 'none' && getComputedStyle(i).maxWidth === 'none')));
 await p.screenshot({ path: `${SHOTS}/d4c-pptx.png` });
 await open('doc.pdf'); await p.waitForSelector('#viewer .pdfpage canvas', { timeout: 20000 });
 await p.waitForFunction(() => /PDF fixture heading/.test(document.querySelector('#viewer .textLayer')?.textContent || ''), null, { timeout: 15000 });
@@ -151,16 +152,31 @@ await ph.screenshot({ path: `${SHOTS}/d6-phone-pptx.png` });
 await ph.click('.row .name:text-is("report.docx")').catch(() => {});
 await ph.close();
 
+// ---- hidden files are shown by default (one setting) ----
+ok('hidden files show in the list by default', await p.locator('.row .name:text-is(".secret")').count() === 1);
+await p.click('#btnSettings'); await p.click('.chip:text-is("Hide")'); await p.click('dialog button:has-text("Close")');
+ok('…and can be hidden in Settings', await p.locator('.row .name:text-is(".secret")').count() === 0);
+await p.click('#btnSettings'); await p.click('.chip:text-is("Show")'); await p.click('dialog button:has-text("Close")');
+await p.click('#btnSettings'); await p.click('dialog details.sect:last-of-type summary'); await p.waitForTimeout(200);
+const labels = await p.evaluate(() => [...document.querySelectorAll('dialog .field')].map(f => f.firstChild.textContent.trim()).filter(Boolean));
+ok('every setting appears once in Settings', labels.length >= 8 && new Set(labels).size === labels.length, labels.join(' | '));
+await p.screenshot({ path: `${SHOTS}/d8-settings.png` });
+await p.click('dialog button:has-text("Close")');
+// ---- bottom bar: the status text is never cut ----
+const foot = await p.evaluate(() => { const sp = document.querySelector('#status span'); sp.textContent = 'Offline · 12 changes waiting to sync with GitHub'; return { clipped: sp.scrollWidth > sp.clientWidth + 1, ellipsis: getComputedStyle(sp).textOverflow === 'ellipsis', rows: document.querySelectorAll('.foot-btns .icon').length }; });
+ok('bottom bar: full sync text visible, buttons on their own row', !foot.clipped && !foot.ellipsis && foot.rows === 5, JSON.stringify(foot));
 // ---- All files tree ----
-await p.click('#btnTree'); await p.waitForSelector('dialog.alltree .trow');
+await p.click('#btnTree'); await p.waitForSelector('dialog.alltree .tn');
 const st0 = await p.locator('dialog.alltree .tstats').innerText();
+ok('all files: drawn as a tree with a root and nested branches', await p.locator('dialog.alltree ul.ttree > li.root > ul > li').count() > 3 && await p.locator('dialog.alltree .rootrow').innerText() === 'me/notes');
 ok('all files: totals with sizes and not-yet-downloaded data', /\d+ files · [\d.]+ (KB|MB|B)/.test(st0), st0);
-const fileCount = await p.evaluate(async () => { const M = await import('/js/model.js'); return M.livePaths().filter(x => !x.split('/').some(s => s.startsWith('.'))).length; });
+const fileCount = await p.evaluate(async () => (await import('/js/model.js')).livePaths().length);   // hidden files are shown by default
 await p.click('dialog.alltree button:text-is("Expand all")');
-ok('all files: every file is listed once everything is expanded', await p.locator('dialog.alltree .trow.file').count() === fileCount, fileCount + ' vs ' + await p.locator('dialog.alltree .trow.file').count());
-ok('all files: files not on the device are marked', await p.locator('dialog.alltree .trow.file.remote').count() > 0 || await p.locator('dialog.alltree .trow.file').count() > 0);
-await p.fill('dialog.alltree input', 'budget.xlsx'); ok('all files: filter', await p.locator('dialog.alltree .trow.file').count() === 1);
-await p.click('dialog.alltree .trow.file'); await p.waitForSelector('#viewer table.xl');
+ok('all files: every file is listed once everything is expanded', await p.locator('dialog.alltree li.file').count() === fileCount, fileCount + ' vs ' + await p.locator('dialog.alltree li.file').count());
+ok('all files: files not on the device are marked', await p.locator('dialog.alltree li.file.remote').count() > 0 || await p.locator('dialog.alltree li.file').count() > 0);
+await p.screenshot({ path: `${SHOTS}/d7-tree.png` });
+await p.fill('dialog.alltree input', 'budget.xlsx'); ok('all files: filter', await p.locator('dialog.alltree li.file').count() === 1);
+await p.click('dialog.alltree li.file > .tn'); await p.waitForSelector('#viewer table.xl');
 ok('all files: clicking a file opens it', await p.locator('dialog.alltree').count() === 0);
 await p.screenshot({ path: `${SHOTS}/d7-tree-closed.png` });
 
@@ -176,7 +192,7 @@ ok('top bar title is centred for every file type', bad.length === 0, bad.join(',
 // ---- settings stay small; collapse the list, focus mode ----
 await open('Guide');
 await p.click('#btnSettings');
-ok('settings are short: theme, size, font, files, sync interval (+ accent)', await p.locator('dialog .chips').count() === 5 && await p.locator('dialog .switch').count() === 0);
+ok('settings are short: theme, size, font, files, sync interval (+ accent)', await p.locator('dialog .chips').count() === 6 && await p.locator('dialog .switch').count() === 0);
 const before = await p.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--primary').trim());
 await p.locator('.pal.custom input').fill('#d81b60');
 ok('custom accent colour', await p.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--primary').trim()) !== before);

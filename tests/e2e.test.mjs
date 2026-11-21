@@ -144,6 +144,7 @@ await page.click('#btnSettings');
 await page.click('.pal[data-id="rose"]');
 const primAfter = await prim();
 ok('palette changes the primary colour', primAfter !== primBefore && /^#[0-9a-f]{6}$/.test(primAfter));
+ok('the colour you pick is used exactly as picked', primAfter === '#e0457b', primAfter);
 ok('tonal colours follow too', await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--secondary-container').trim()) !== '');
 ok('favicon follows the palette', (await page.evaluate(() => decodeURIComponent(document.querySelector('link[rel=icon]').href))).includes(primAfter) && !favBefore.includes(primAfter));
 await page.screenshot({ path: `${SHOTS}/3-settings-rose.png` });

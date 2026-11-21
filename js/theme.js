@@ -28,7 +28,7 @@ export const PARTS = [
   ['status', 'Sync status text'], ['stats', 'Word count'], ['toolbar', 'Formatting bar'],
 ];
 
-const DEFAULTS = { theme: 'auto', palette: 'teal', seeds: ['#0e8f7e', '', ''], vibrance: 'normal', width: 'normal', font: 'sans', spacing: 'normal', shape: 'normal', density: 'comfortable', size: 17, poll: 120, files: 'smart', hide: [] };
+const DEFAULTS = { theme: 'auto', palette: 'teal', seeds: ['#0e8f7e', '', ''], vibrance: 'normal', width: 'normal', font: 'sans', spacing: 'normal', shape: 'normal', density: 'comfortable', size: 17, poll: 120, files: 'smart', hidden: true, hide: [] };
 export const prefs = { ...DEFAULTS, ...ls.get('prefs', {}) };
 // migrations: v1 purple default, v2 single accent colour -> palettes, v3 text sizes
 if (!prefs.v) { if (prefs.accent === '#6d5ae6') prefs.accent = '#0e8f7e'; prefs.v = 2; }
@@ -100,7 +100,17 @@ export function scheme(seeds, vibrance, mode) {
   const P = palettes(seeds, vibrance), dark = mode !== 'light', out = {};
   for (const [role, [pal, l, d]] of Object.entries(ROLES)) {
     const t = dark ? (mode === 'black' && role in BLACK ? BLACK[role] : d) : l, q = P[pal];
-    out['--' + role] = tone(role === 'primary' || role.startsWith('on-') && t > 15 && t < 85 ? q : { h: q.h, C: q.C * (t >= 85 ? .8 : t <= 32 && t > 0 ? .9 : 1) }, t);   // pale/deep containers are softer than the key colour
+    out['--' + role] = tone(role === 'primary' || role.startsWith('on-') && t > 15 && t < 85 ? q : { h: q.h, C: q.C * (t >= 85 ? .5 : t <= 32 && t > 0 ? .9 : 1) }, t);   // pale/deep containers are softer than the key colour
+  }
+  if (vibrance === 'normal') {                                   // the colour you picked is used as it is, not a re-tinted version of it
+    const lum = c => { const [r, g, b] = rgb(c).map(lin); return .2126 * r + .7152 * g + .0722 * b; };
+    const ratio = (x, y) => { const [p, q] = [lum(x), lum(y)].sort((m, n) => n - m); return (p + .05) / (q + .05); };
+    const fit = c => { let v = c; for (let i = 0; mode !== 'light' && i < 14 && ratio(v, out['--surface']) < 3.2; i++) v = hex(rgb(v).map(k => k + (1 - k) * .08)); return v; };   // only lightened if it would vanish on a dark surface
+    const ok = x => /^#[0-9a-f]{6}$/i.test(x || '') ? x.toLowerCase() : null;
+    const [sp, ss, st] = seeds.map(ok);
+    if (sp) { const v = fit(sp); out['--primary'] = v; out['--on-primary'] = ratio(v, '#ffffff') >= 3.4 ? '#ffffff' : '#111111'; out['--inverse-primary'] = out['--inverse-primary']; }
+    if (ss) out['--secondary'] = fit(ss);
+    if (st) out['--tertiary'] = fit(st);
   }
   out['--scrim'] = '#000'; out['--warn'] = dark ? '#f5b84a' : '#9a6700'; out['--ok'] = dark ? '#6dd58c' : '#1b7f3c';
   return out;
