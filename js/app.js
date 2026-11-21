@@ -1,138 +1,45 @@
 import * as M from './model.js';
 import * as G from './sync.js';
 import * as U from './util.js';
-import { marked } from '../vendor/marked.js';
-import DOMPurify from '../vendor/purify.js';
+import * as P from './preview.js';
+import * as E from './editor-tools.js';
+import { $, h, debounce, ls, toast, stamp, mdUrl, fmtSize } from './dom.js';
+import { icon } from './icons.js';
+import { promptText, confirmBox, pickFolder, showMenu, hideMenu } from './dialogs.js';
+import { prefs, applyPrefs } from './theme.js';
+import { openSettings } from './settings.js';
 
-/* ---------------------------------------------------------------- helpers */
-const $ = s => document.querySelector(s);
-const h = (tag, props, ...kids) => {
-  const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(props || {})) {
-    if (v == null || v === false) continue;
-    if (k === 'class') e.className = v;
-    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
-    else if (k === 'style') e.setAttribute('style', v);
-    else e.setAttribute(k, v === true ? '' : v);
-  }
-  for (const c of kids.flat()) if (c != null && c !== false) e.append(c.nodeType ? c : document.createTextNode(c));
-  return e;
-};
-const ICONS = {
-  file: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/>',
-  note: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4M10 9H8M16 13H8M16 17H8"/>',
-  image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/>',
-  folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
-  folderPlus: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/><path d="M12 10v6M9 13h6"/>',
-  chev: '<path d="m9 18 6-6-6-6"/>',
-  plus: '<path d="M5 12h14M12 5v14"/>',
-  upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
-  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
-  sync: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M8 16H3v5"/>',
-  sliders: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
-  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
-  menu: '<path d="M4 12h16M4 6h16M4 18h16"/>',
-  more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
-  star: '<path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.9-6.2-3.3-6.2 3.3L7 14.2 2 9.3l6.9-1z"/>',
-  clip: '<path d="m21.4 11.1-9.2 9.2a6 6 0 0 1-8.5-8.5l8.6-8.6a4 4 0 1 1 5.7 5.7l-8.6 8.6a2 2 0 0 1-2.8-2.8l8.5-8.5"/>',
-  bold: '<path d="M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8"/>',
-  italic: '<path d="M19 4h-9M14 20H5M15 4 9 20"/>',
-  heading: '<path d="M6 12h12M6 20V4M18 20V4"/>',
-  list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
-  check: '<path d="m9 11 3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
-  quote: '<path d="M3 21c3 0 7-1 7-8V5c0-1.25-.76-2-2-2H4c-1.25 0-2 .75-2 2v6c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 0-1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.76-2-2-2h-4c-1.25 0-2 .75-2 2v6c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3z"/>',
-  code: '<path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/>',
-  link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
-  trash: '<path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>',
-  pencil: '<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>',
-  eye: '<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
-  columns: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 3v18"/>',
-  move: '<path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20"/>',
-  copy: '<rect x="8" y="8" width="14" height="14" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
-  x: '<path d="M18 6 6 18M6 6l12 12"/>',
-};
-const icon = (n, cls) => { const t = document.createElement('template'); t.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"${cls ? ` class="${cls}"` : ''}>${ICONS[n]}</svg>`; return t.content.firstChild; };
-const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
-const ls = { get: (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } }, set: (k, v) => localStorage.setItem(k, JSON.stringify(v)) };
-const stamp = () => new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14).replace(/^(\d{8})/, '$1-');
-const mdUrl = p => p.split('/').map(encodeURIComponent).join('/').replace(/\(/g, '%28').replace(/\)/g, '%29');
-const fmtSize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
-
-let toastT;
-function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2800); }
+const MAX_FILE = 25 * 1024 * 1024;   // keep uploads phone- and API-friendly
 
 /* ---------------------------------------------------------------- state */
 const S = {
-  current: null, dir: '', mode: ls.get('mode', 'split'),
-  expanded: new Set(ls.get('expanded', [])), q: '',
-  kind: null, shownSha: null,
+  current: null, dir: '', q: '', kind: null, shownSha: null,
+  mode: ls.get('mode', 'split'),
+  expanded: new Set(ls.get('expanded', [])),
+  fresh: null,                       // path of a just-created, still-untouched note (discarded if left empty)
 };
-const prefs = { theme: 'auto', accent: '#6d5ae6', ...ls.get('prefs', {}) };
 const ed = $('#ed'), pane = $('#pane'), preview = $('#preview'), titleEl = $('#title');
-const wide = matchMedia('(min-width: 980px)');
-let dirtyEd = false;
+const wide = matchMedia('(min-width: 980px)'), narrow = matchMedia('(max-width: 820px)'), finePointer = matchMedia('(hover: hover) and (pointer: fine)');
+let dirtyEd = false, saveT, flushing = Promise.resolve(), swReg = null;
 
-function applyPrefs() {
-  const r = document.documentElement;
-  if (prefs.theme === 'auto') r.removeAttribute('data-theme'); else r.dataset.theme = prefs.theme;
-  r.style.setProperty('--accent', prefs.accent);
-  const lum = c => { const n = parseInt(c.slice(1), 16); return ((n >> 16) * .299 + ((n >> 8) & 255) * .587 + (n & 255) * .114); };
-  r.style.setProperty('--accent-fg', lum(prefs.accent) > 175 ? '#1a1a1d' : '#fff');
-  requestAnimationFrame(() => $('meta[name=theme-color]').content = getComputedStyle(document.body).backgroundColor);
+/* ---------------------------------------------------------------- mobile drawer */
+let navWatcher = null;
+function openNav() {
+  document.body.classList.add('nav-open');
+  if (narrow.matches && !navWatcher && 'CloseWatcher' in window) {      // Android back button closes the drawer
+    try { navWatcher = new CloseWatcher(); navWatcher.onclose = () => { navWatcher = null; document.body.classList.remove('nav-open'); }; } catch { /* needs user activation */ }
+  }
 }
-matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyPrefs);
-
-/* ---------------------------------------------------------------- dialogs */
-function modal(build) {
-  return new Promise(res => {
-    const d = h('dialog', { class: 'modal' });
-    const close = v => { res(v); d.close(); };
-    d.addEventListener('close', () => { res(null); d.remove(); });
-    build(d, close);
-    document.body.append(d);
-    d.showModal();
-  });
-}
-function promptText({ title, value = '', label = 'Name', ok = 'OK', body }) {
-  return modal((d, close) => {
-    const inp = h('input', { value, autocomplete: 'off', spellcheck: 'false', enterkeyhint: 'done' });
-    const f = h('form', { method: 'dialog', onsubmit: e => { e.preventDefault(); close(inp.value.trim() || null); } },
-      h('div', { class: 'mbody' }, h('h3', {}, title), body && h('p', {}, body), h('label', { class: 'field' }, label, inp)),
-      h('div', { class: 'mfoot' }, h('button', { type: 'button', class: 'ghost', onclick: () => close(null) }, 'Cancel'), h('button', { class: 'primary' }, ok)));
-    d.append(f);
-    setTimeout(() => { inp.focus(); const dot = value.lastIndexOf('.'); inp.setSelectionRange(0, dot > 0 && !value.endsWith('/') && /^\w{1,5}$/.test(value.slice(dot + 1)) ? dot : value.length); }, 30);
-  });
-}
-function confirmBox({ title, body, ok = 'OK', danger }) {
-  return modal((d, close) => d.append(
-    h('div', { class: 'mbody' }, h('h3', {}, title), h('p', {}, body)),
-    h('div', { class: 'mfoot' }, h('button', { class: 'ghost', onclick: () => close(false) }, 'Cancel'), h('button', { class: danger ? 'danger' : 'primary', onclick: () => close(true) }, ok)))).then(v => !!v);
-}
-function pickFolder({ title, exclude }) {
-  return modal((d, close) => {
-    const dirs = ['', ...M.allDirs()];
-    const list = h('div', { class: 'folderlist' }, dirs.map(p => {
-      const off = exclude && (p === exclude || p.startsWith(exclude + '/'));
-      const depth = p ? p.split('/').length : 0;
-      return h('button', { disabled: off, style: `--d:${depth}`, onclick: () => close({ path: p }) }, icon('folder'), p ? U.basename(p) : 'Top level');
-    }));
-    d.append(h('div', { class: 'mbody' }, h('h3', {}, title), list), h('div', { class: 'mfoot' }, h('button', { class: 'ghost', onclick: () => close(null) }, 'Cancel')));
-  }).then(v => v ? v.path : null);
+function closeNav() {
+  document.body.classList.remove('nav-open');
+  navWatcher?.destroy(); navWatcher = null;
 }
 
-/* ---------------------------------------------------------------- context menu */
-const menuEl = $('#menu');
-function showMenu(items, x, y, alignRight) {
-  menuEl.replaceChildren(...items.map(it => it === '-' ? h('hr') : h('button', { role: 'menuitem', class: it.danger ? 'danger-i' : '', onclick: () => { hideMenu(); it.run(); } }, icon(it.icon), it.label)));
-  menuEl.classList.add('show');
-  const w = menuEl.offsetWidth, hh = menuEl.offsetHeight;
-  menuEl.style.left = Math.max(8, Math.min(alignRight ? x - w : x, innerWidth - w - 8)) + 'px';
-  menuEl.style.top = Math.max(8, Math.min(y, innerHeight - hh - 8)) + 'px';
-}
-const hideMenu = () => menuEl.classList.remove('show');
-document.addEventListener('pointerdown', e => { if (!menuEl.contains(e.target)) hideMenu(); }, true);
-addEventListener('resize', hideMenu);
-$('#tree').addEventListener('scroll', hideMenu);
+/* ---------------------------------------------------------------- tree */
+const saveExpanded = () => ls.set('expanded', [...S.expanded]);
+function expandTo(dir) { let p = ''; for (const s of dir.split('/').filter(Boolean)) { p = U.join(p, s); S.expanded.add(p); } saveExpanded(); }
+const displayName = p => U.isNote(p) ? U.stem(p) : U.basename(p);
+const fileIcon = p => U.kindOf(p) === 'image' ? 'image' : U.isNote(p) ? 'note' : 'file';
 
 function fileMenu(path) {
   const pinned = M.getPins().includes(path);
@@ -155,57 +62,69 @@ const folderMenu = path => [
   '-', { icon: 'trash', label: 'Delete folder', danger: true, run: () => deleteItem(path, 'dir') },
 ];
 
-/* ---------------------------------------------------------------- tree */
-function saveExpanded() { ls.set('expanded', [...S.expanded]); }
-function expandTo(dir) { const parts = dir.split('/').filter(Boolean); let p = ''; for (const s of parts) { p = U.join(p, s); S.expanded.add(p); } saveExpanded(); }
-const displayName = p => U.isNote(p) ? U.stem(p) : U.basename(p);
-const fileIcon = p => { const k = U.kindOf(p); return k === 'image' ? 'image' : U.isNote(p) ? 'note' : 'file'; };
-
-function row({ type, path, depth, name, ico, active, open, pinned }) {
-  const r = h('div', { class: `row ${type === 'dir' ? 'folder' : 'file'}${active ? ' active' : ''}${open ? ' open' : ''}`, style: `--d:${depth}`, draggable: 'true', 'data-path': path, 'data-type': type, role: 'treeitem' },
-    type === 'dir' ? icon('chev', 'chev') : h('span', { style: 'width:14px' }),
-    icon(ico, 'fi'), h('span', { class: 'name' }, name), pinned && icon('star', 'pinmark'),
-    h('button', { class: 'more', 'aria-label': 'More', onclick: e => { e.stopPropagation(); const b = e.currentTarget.getBoundingClientRect(); showMenu(type === 'dir' ? folderMenu(path) : fileMenu(path), b.right, b.bottom + 4, true); } }, icon('more')));
-  r.addEventListener('click', () => type === 'dir' ? toggleDir(path) : openFile(path));
-  r.addEventListener('contextmenu', e => { e.preventDefault(); showMenu(type === 'dir' ? folderMenu(path) : fileMenu(path), e.clientX, e.clientY); });
+function row({ type, path, depth, name, ico, active, open }) {
+  const isDir = type === 'dir';
+  const r = h('div', {
+    class: `row ${isDir ? 'folder' : 'file'}${active ? ' active' : ''}${open ? ' open' : ''}`, style: `--d:${depth}`, role: 'treeitem', tabindex: '-1',
+    draggable: finePointer.matches ? 'true' : null, 'data-path': path, 'data-type': type,
+    'aria-expanded': isDir ? String(!!open) : null, 'aria-selected': isDir ? null : String(!!active),
+  },
+    isDir ? icon('chev', 'chev') : h('span', { style: 'width:14px;flex:none' }),
+    icon(ico, 'fi'), h('span', { class: 'name' }, name),
+    h('button', { class: 'more', 'aria-label': `Actions for ${name}`, onclick: e => { e.stopPropagation(); const b = e.currentTarget.getBoundingClientRect(); showMenu(isDir ? folderMenu(path) : fileMenu(path), b.right, b.bottom + 4, true); } }, icon('more')));
+  r.addEventListener('click', () => isDir ? toggleDir(path) : openFile(path));
+  r.addEventListener('contextmenu', e => { e.preventDefault(); showMenu(isDir ? folderMenu(path) : fileMenu(path), e.clientX, e.clientY); });
   r.addEventListener('dragstart', e => { e.dataTransfer.setData('text/x-note', JSON.stringify({ path, type })); e.dataTransfer.effectAllowed = 'move'; document.body.classList.add('dragging'); });
   r.addEventListener('dragend', () => document.body.classList.remove('dragging'));
-  if (type === 'dir') {
+  if (isDir) {
     r.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); r.classList.add('drop'); });
     r.addEventListener('dragleave', e => { if (!r.contains(e.relatedTarget)) r.classList.remove('drop'); });
     r.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); r.classList.remove('drop'); handleDrop(e, path); });
   }
   return r;
 }
-function toggleDir(path) { S.dir = path; if (S.expanded.has(path)) S.expanded.delete(path); else S.expanded.add(path); saveExpanded(); renderTree(); }
+function toggleDir(path) { S.dir = path; S.expanded.has(path) ? S.expanded.delete(path) : S.expanded.add(path); saveExpanded(); renderTree(); }
 
 function renderTree() {
   const el = $('#tree');
   if (S.q) return renderSearch(el);
-  const keep = el.scrollTop;
-  el.replaceChildren();
+  const keep = el.scrollTop, frag = document.createDocumentFragment();
   el.setAttribute('role', 'tree');
   const pins = M.getPins().filter(M.exists);
   if (pins.length) {
-    el.append(h('div', { class: 'sec' }, 'Pinned'));
-    for (const p of pins) el.append(row({ type: 'file', path: p, depth: 0, name: displayName(p), ico: fileIcon(p), active: p === S.current }));
-    el.append(h('div', { class: 'sec' }, 'All notes'));
+    frag.append(h('div', { class: 'sec' }, 'Pinned'));
+    for (const p of pins) frag.append(row({ type: 'file', path: p, depth: 0, name: displayName(p), ico: fileIcon(p), active: p === S.current }));
+    frag.append(h('div', { class: 'sec' }, 'All notes'));
   }
   const walk = (n, depth) => {
     for (const d of [...n.dirs.values()].sort((a, b) => U.naturalCmp(a.name, b.name))) {
       const open = S.expanded.has(d.path);
-      el.append(row({ type: 'dir', path: d.path, depth, name: d.name, ico: 'folder', open }));
+      frag.append(row({ type: 'dir', path: d.path, depth, name: d.name, ico: 'folder', open }));
       if (open) walk(d, depth + 1);
     }
-    for (const f of n.files.sort((a, b) => U.naturalCmp(a.path, b.path))) el.append(row({ type: 'file', path: f.path, depth, name: displayName(f.path), ico: fileIcon(f.path), active: f.path === S.current }));
+    for (const f of n.files.sort((a, b) => U.naturalCmp(a.path, b.path))) frag.append(row({ type: 'file', path: f.path, depth, name: displayName(f.path), ico: fileIcon(f.path), active: f.path === S.current }));
   };
   walk(M.buildTree(), 0);
-  if (!el.querySelector('.row')) el.append(h('div', { class: 'empty-tree' }, G.configured() ? (G.status.state === 'syncing' ? 'Syncing your notes…' : 'No notes yet. Create one with the button above.') : 'No notes yet. Create one, or connect GitHub in settings to load your repo.'));
+  if (!frag.querySelector('.row')) {
+    const msg = !G.configured() ? 'No notes yet. Create one, or connect GitHub in Settings to load your repo.'
+      : G.status.state === 'syncing' ? (G.status.msg || 'Syncing your notes…') : 'No notes yet. Tap “New note” to start.';
+    frag.append(h('div', { class: 'empty-tree' }, msg));
+  }
+  el.replaceChildren(frag);
   el.scrollTop = keep;
 }
-$('#tree').addEventListener('dragover', e => { e.preventDefault(); $('#tree').classList.add('drop-root'); });
-$('#tree').addEventListener('dragleave', e => { if (!$('#tree').contains(e.relatedTarget)) $('#tree').classList.remove('drop-root'); });
-$('#tree').addEventListener('drop', e => { e.preventDefault(); $('#tree').classList.remove('drop-root'); handleDrop(e, ''); });
+const treeEl = $('#tree');
+treeEl.addEventListener('dragover', e => { e.preventDefault(); treeEl.classList.add('drop-root'); });
+treeEl.addEventListener('dragleave', e => { if (!treeEl.contains(e.relatedTarget)) treeEl.classList.remove('drop-root'); });
+treeEl.addEventListener('drop', e => { e.preventDefault(); treeEl.classList.remove('drop-root'); handleDrop(e, ''); });
+treeEl.addEventListener('keydown', e => {        // arrow-key navigation
+  const rows = [...treeEl.querySelectorAll('.row')], i = rows.indexOf(document.activeElement);
+  const go = j => { e.preventDefault(); rows[Math.max(0, Math.min(rows.length - 1, j))]?.focus(); };
+  if (e.key === 'ArrowDown') go(i + 1); else if (e.key === 'ArrowUp') go(i - 1);
+  else if ((e.key === 'Enter' || e.key === ' ') && i >= 0) { e.preventDefault(); rows[i].click(); }
+  else if (e.key === 'ArrowRight' && rows[i]?.dataset.type === 'dir' && !S.expanded.has(rows[i].dataset.path)) rows[i].click();
+  else if (e.key === 'ArrowLeft' && rows[i]?.dataset.type === 'dir' && S.expanded.has(rows[i].dataset.path)) rows[i].click();
+});
 
 async function handleDrop(e, destDir) {
   document.body.classList.remove('dragging');
@@ -213,11 +132,35 @@ async function handleDrop(e, destDir) {
   try { const { path, type } = JSON.parse(e.dataTransfer.getData('text/x-note')); await moveInto(path, type, destDir); } catch { /* not ours */ }
 }
 
+/* pull down on the list to sync */
+function bindPullToRefresh(el, ptr, onRefresh) {
+  let y0 = null, ready = false;
+  const reset = () => { y0 = null; ready = false; ptr.classList.remove('pulling', 'ready'); ptr.style.removeProperty('--p'); };
+  ptr.append(icon('sync'));
+  el.addEventListener('touchstart', e => { y0 = el.scrollTop <= 0 && e.touches.length === 1 ? e.touches[0].clientY : null; }, { passive: true });
+  el.addEventListener('touchmove', e => {
+    if (y0 == null) return;
+    const dy = e.touches[0].clientY - y0;
+    if (dy <= 0 || el.scrollTop > 0) { if (dy <= 0) reset(); return; }
+    if (e.cancelable) e.preventDefault();
+    const p = Math.min(dy * .5, 72);
+    ptr.style.setProperty('--p', p); ptr.classList.add('pulling');
+    ready = p >= 56; ptr.classList.toggle('ready', ready);
+  }, { passive: false });
+  const end = async () => {
+    if (!ready) return reset();
+    reset(); navigator.vibrate?.(8);
+    ptr.classList.add('loading');
+    try { await onRefresh(); } finally { ptr.classList.remove('loading'); }
+  };
+  el.addEventListener('touchend', end); el.addEventListener('touchcancel', reset);
+}
+
 /* ---------------------------------------------------------------- search */
 function renderSearch(el) {
   const q = S.q.toLowerCase(), hits = [];
   for (const r of M.files.values()) {
-    if (r.deleted || U.basename(r.path).startsWith('.') || r.path.split('/').some(s => s.startsWith('.'))) continue;
+    if (r.deleted || U.isHidden(r.path)) continue;
     const nameHit = r.path.toLowerCase().includes(q);
     let snip = '';
     if (typeof r.content === 'string') {
@@ -226,19 +169,20 @@ function renderSearch(el) {
       else if (!nameHit) continue;
     } else if (!nameHit) continue;
     hits.push({ r, snip, nameHit });
-    if (hits.length >= 60) break;
   }
-  hits.sort((a, b) => b.nameHit - a.nameHit);
-  el.replaceChildren(...(hits.length ? hits.map(({ r, snip }) => {
-    const mark = t => { const i = t.toLowerCase().indexOf(q); return i < 0 ? t : [t.slice(0, i), h('mark', {}, t.slice(i, i + q.length)), t.slice(i + q.length)]; };
-    return h('div', { class: 'hit', onclick: () => { openFile(r.path); } }, h('b', {}, mark(displayName(r.path))), h('small', {}, U.dirname(r.path) || 'Top level'), snip && h('small', {}, mark(snip)));
-  }) : [h('div', { class: 'empty-tree' }, 'Nothing found')]));
+  hits.sort((a, b) => b.nameHit - a.nameHit || U.naturalCmp(a.r.path, b.r.path));
+  const mark = t => { const i = t.toLowerCase().indexOf(q); return i < 0 ? t : [t.slice(0, i), h('mark', {}, t.slice(i, i + q.length)), t.slice(i + q.length)]; };
+  el.setAttribute('role', 'list');
+  el.replaceChildren(...(hits.length ? hits.slice(0, 80).map(({ r, snip }) =>
+    h('div', { class: 'hit', role: 'listitem', onclick: () => openFile(r.path) }, h('b', {}, mark(displayName(r.path))), h('small', {}, U.dirname(r.path) || 'Top level'), snip && h('small', {}, mark(snip))))
+    : [h('div', { class: 'empty-tree' }, 'Nothing found')]));
 }
 
 /* ---------------------------------------------------------------- file operations */
 async function openFile(path) {
   await flush();
   if (!M.exists(path)) return;
+  await discardFresh(path);
   S.current = path; S.dir = U.dirname(path);
   ls.set('last', path);
   expandTo(S.dir);
@@ -247,15 +191,25 @@ async function openFile(path) {
   closeNav();
 }
 function closeFile() {
-  S.current = null; S.kind = null;
+  S.current = null; S.kind = null; S.fresh = null; dirtyEd = false;
   $('#main').classList.remove('has-file');
   renderTree();
+  if (narrow.matches) openNav();
+}
+/** A note created with "New note" that was left empty and unnamed is removed instead of cluttering the repo. */
+async function discardFresh(next) {
+  const p = S.fresh;
+  if (!p || p === next) return;
+  S.fresh = null;
+  const r = M.files.get(p);
+  if (r && !r.deleted && S.current === p && !ed.value.trim() && U.stem(p).startsWith('Untitled')) await M.remove(p);
 }
 async function newNote(dir = S.dir) {
   const p = U.uniquePath(U.join(dir, 'Untitled.txt'), M.exists);
   await M.create(p, '');
   if (dir) expandTo(dir);
   await openFile(p);
+  S.fresh = p;
   titleEl.focus(); titleEl.select();
 }
 async function newFolder(dir = S.dir) {
@@ -269,22 +223,32 @@ async function newFolder(dir = S.dir) {
 }
 function pickUpload(dir = S.dir) {
   const inp = $('#filePick');
-  inp.value = '';
-  inp.onchange = () => uploadFiles([...inp.files], dir);
+  inp.value = ''; inp.onchange = () => uploadFiles([...inp.files], dir);
   inp.click();
 }
+/** Returns the paths that were added (files over the size limit are skipped). */
+async function addFiles(files, dir) {
+  const added = [];
+  for (const f of files) {
+    if (f.size > MAX_FILE) { toast(`“${f.name}” is over ${fmtSize(MAX_FILE)} and was skipped`); continue; }
+    let name = U.sanitizeName(f.name || '') || 'file';
+    if (/^image\.\w+$/i.test(name)) name = `pasted-${stamp()}.${U.extOf(name)}`;
+    const p = U.uniquePath(U.join(dir, name), M.exists);
+    await M.create(p, f);
+    added.push(p);
+  }
+  return added;
+}
 async function uploadFiles(files, dir) {
-  if (!files.length) return;
-  let last;
-  for (const f of files) { last = U.uniquePath(U.join(dir, U.sanitizeName(f.name) || 'file'), M.exists); await M.create(last, f); }
+  const added = await addFiles(files, dir);
+  if (!added.length) return;
   if (dir) expandTo(dir);
-  toast(files.length === 1 ? `Added ${U.basename(last)}` : `Added ${files.length} files`);
-  if (files.length === 1) openFile(last);
+  toast(added.length === 1 ? `Added ${U.basename(added[0])}` : `Added ${added.length} files`);
+  if (added.length === 1) openFile(added[0]);
 }
 async function renameItem(path, type) {
   await flush();
-  const cur = U.basename(path);
-  const val = await promptText({ title: type === 'dir' ? 'Rename folder' : 'Rename', value: type === 'file' && U.isNote(path) ? U.stem(path) : cur, ok: 'Rename' });
+  const val = await promptText({ title: type === 'dir' ? 'Rename folder' : 'Rename', value: type === 'file' && U.isNote(path) ? U.stem(path) : U.basename(path), ok: 'Rename' });
   if (val) await doRename(path, type, val);
 }
 async function doRename(path, type, input) {
@@ -301,7 +265,7 @@ async function doRename(path, type, input) {
 }
 function remapState(from, to) {
   const m = p => p === from ? to : p && p.startsWith(from + '/') ? to + p.slice(from.length) : p;
-  S.current = m(S.current); S.dir = m(S.dir) ?? '';
+  S.current = m(S.current); S.dir = m(S.dir) ?? ''; S.fresh = m(S.fresh);
   S.expanded = new Set([...S.expanded].map(m)); saveExpanded();
   if (S.current) ls.set('last', S.current);
 }
@@ -324,22 +288,29 @@ async function moveInto(src, type, destDir) {
   }
   if (destDir) expandTo(destDir);
   renderTree(); syncHeader();
-  toast(`Moved to ${destDir || 'top level'}`);
+  toast(`Moved to ${destDir ? U.basename(destDir) : 'top level'}`);
 }
+/** Deleting is immediate with an Undo toast (folders ask first). Git history keeps old versions as well. */
 async function deleteItem(path, type) {
-  const n = type === 'dir' ? M.livePaths().filter(p => p.startsWith(path + '/') && !p.endsWith('/.gitkeep')).length : 0;
-  const ok = await confirmBox({ title: type === 'dir' ? `Delete “${U.basename(path)}”?` : `Delete “${displayName(path)}”?`, body: type === 'dir' ? `This folder and its ${n} file${n === 1 ? '' : 's'} will be removed here and on GitHub at the next sync. (Git history keeps old versions.)` : 'It will be removed here and on GitHub at the next sync. (Git history keeps the old version.)', ok: 'Delete', danger: true });
-  if (!ok) return;
-  dirtyEd = false;
+  await flush();
+  const under = type === 'dir' ? M.livePaths().filter(p => p.startsWith(path + '/')) : [path];
+  const count = under.filter(p => !p.endsWith('/.gitkeep')).length;
+  if (type === 'dir' && count > 0 && !await confirmBox({ title: `Delete “${U.basename(path)}”?`, body: `This folder and its ${count} file${count === 1 ? '' : 's'} will be deleted. You’ll be able to undo for a few seconds.`, ok: 'Delete', danger: true })) return;
+  const snapshot = under.map(p => ({ ...M.files.get(p) })), pins = M.getPins();
+  const wasOpen = S.current && (S.current === path || S.current.startsWith(path + '/'));
   type === 'dir' ? await M.removeDir(path) : await M.remove(path);
-  if (S.current && (S.current === path || S.current.startsWith(path + '/'))) closeFile();
+  if (wasOpen) closeFile();
   renderTree();
+  toast(`Deleted “${type === 'dir' ? U.basename(path) : displayName(path)}”`, {
+    action: 'Undo',
+    onAction: async () => { await M.restore(snapshot); if (pins.length) await M.setPins(pins); renderTree(); toast('Restored'); },
+  });
 }
 async function duplicate(path) {
   await flush();
-  const r = M.files.get(path);
-  const to = U.uniquePath(U.join(U.dirname(path), `${U.stem(path)} copy.${U.extOf(path)}`.replace(/\.$/, '')), M.exists);
-  await M.create(to, r.content ?? await M.getBlob(path));
+  const e = U.extOf(path), to = U.uniquePath(U.join(U.dirname(path), `${U.stem(path)} copy${e ? '.' + e : ''}`), M.exists);
+  const { content } = await M.ensureContent(path);
+  await M.create(to, content);
   openFile(to);
 }
 async function downloadFile(path) {
@@ -362,7 +333,8 @@ async function showFile(path) {
   S.kind = k; S.shownSha = r.sha;
   $('#main').classList.add('has-file');
   if (k === 'text') {
-    ed.value = r.content ?? await (await M.getBlob(path)).text();
+    try { ed.value = (r.content ?? (await M.ensureContent(path)).content) ?? ''; }
+    catch (e) { ed.value = ''; toast('Could not load this file: ' + e.message); }
     ed.classList.toggle('mono', !U.isNote(path));
     dirtyEd = false;
     applyMode();
@@ -377,25 +349,24 @@ function syncHeader() {
   const p = S.current;
   if (!p || !M.exists(p)) return;
   const note = U.isNote(p);
-  const shown = note ? U.stem(p) : U.basename(p);
-  if (document.activeElement !== titleEl) titleEl.value = shown;
-  sizeTitle();
-  $('#titleExt').textContent = '';
+  if (document.activeElement !== titleEl) titleEl.value = note ? U.stem(p) : U.basename(p);
   $('#crumb').textContent = U.dirname(p).split('/').filter(Boolean).join('  ›  ') || 'Top level';
-  const pinned = M.getPins().includes(p);
-  const pb = $('#btnPin'); pb.classList.toggle('on', pinned); pb.title = pinned ? 'Unpin' : 'Pin to top'; pb.hidden = !note;
+  const pinned = M.getPins().includes(p), pb = $('#btnPin');
+  pb.classList.toggle('on', pinned); pb.title = pinned ? 'Unpin' : 'Pin to top'; pb.setAttribute('aria-label', pb.title); pb.hidden = !note;
   pb.firstChild.style.fill = pinned ? 'currentColor' : 'none';
   $('#modes').hidden = !U.isMarkdown(p);
 }
-const sizeTitle = () => { titleEl.style.width = Math.min(Math.max(titleEl.value.length + 1, 6), 60) + 'ch'; };
-titleEl.addEventListener('input', sizeTitle);
-titleEl.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); (S.kind === 'text' ? ed : titleEl).focus(); } if (e.key === 'Escape') { titleEl.value = ''; syncHeader(); titleEl.blur(); } });
+titleEl.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); (S.kind === 'text' ? ed : titleEl).focus(); }
+  if (e.key === 'Escape') { titleEl.value = ''; titleEl.blur(); }
+});
 titleEl.addEventListener('change', async () => {
   const p = S.current; if (!p) return;
   await flush();
   const ok = titleEl.value.trim() && await doRename(p, 'file', titleEl.value);
-  if (!ok) { titleEl.value = ''; syncHeader(); }
-  titleEl.blur(); syncHeader();
+  titleEl.blur();
+  if (!ok) titleEl.value = '';
+  syncHeader();
 });
 
 function effMode() {
@@ -406,7 +377,7 @@ function applyMode() {
   const m = effMode();
   pane.dataset.mode = m;
   const modes = [['edit', 'pencil', 'Edit'], ...(wide.matches ? [['split', 'columns', 'Split']] : []), ['preview', 'eye', 'Preview']];
-  $('#modes').replaceChildren(...modes.map(([id, ic, label]) => h('button', { class: id === m ? 'on' : '', title: label, 'aria-pressed': id === m, onclick: () => { S.mode = id; ls.set('mode', id); applyMode(); if (id === 'edit') ed.focus(); } }, icon(ic), h('span', {}, label))));
+  $('#modes').replaceChildren(...modes.map(([id, ic, label]) => h('button', { class: id === m ? 'on' : '', title: label, 'aria-label': label, 'aria-pressed': String(id === m), onclick: () => { S.mode = id; ls.set('mode', id); applyMode(); if (id === 'edit') ed.focus(); } }, icon(ic), h('span', {}, label))));
   if (m !== 'edit') renderPreview();
   $('#toolbar').hidden = !(U.isNote(S.current || '') && m !== 'preview');
 }
@@ -417,356 +388,243 @@ async function renderViewer(path, k) {
   v.replaceChildren(h('div', { class: 'filecard' }, 'Loading…'));
   const acts = h('div', { class: 'viewer-actions' }, h('button', { class: 'ghost', onclick: () => downloadFile(path) }, icon('download'), 'Download'));
   try {
-    const url = await blobUrl(path), r = M.files.get(path);
-    const open = h('a', { class: 'ghost', href: url, target: '_blank', rel: 'noopener', style: 'text-decoration:none;display:inline-flex;align-items:center;height:34px;padding:0 12px;border-radius:8px' }, 'Open in new tab');
+    const url = await P.blobUrl(path), r = M.files.get(path);
+    if (S.current !== path) return;                                  // user moved on while it loaded
     if (k === 'image') v.replaceChildren(h('img', { src: url, alt: U.basename(path) }), acts);
     else if (k === 'video') v.replaceChildren(h('video', { src: url, controls: true }), acts);
     else if (k === 'audio') v.replaceChildren(h('audio', { src: url, controls: true }), acts);
-    else if (k === 'pdf') { acts.append(open); v.replaceChildren(h('iframe', { src: url, title: U.basename(path) }), acts); }
-    else v.replaceChildren(h('div', { class: 'filecard' }, icon('file'), h('div', {}, U.basename(path)), h('small', {}, r?.content ? fmtSize(r.content.size ?? r.content.length) : 'Not downloaded yet')), acts);
-  } catch (e) { v.replaceChildren(h('div', { class: 'filecard' }, 'Could not load this file: ' + e.message)); }
+    else if (k === 'pdf') { acts.append(h('a', { class: 'ghost', href: url, target: '_blank', rel: 'noopener' }, 'Open in new tab')); v.replaceChildren(h('iframe', { src: url, title: U.basename(path) }), acts); }
+    else v.replaceChildren(h('div', { class: 'filecard' }, icon('file'), h('div', {}, U.basename(path)), h('small', {}, fmtSize(r.content?.size ?? 0))), acts);
+  } catch (e) {
+    v.replaceChildren(h('div', { class: 'filecard' }, G.configured() ? 'Could not load this file: ' + e.message : 'This file isn’t on this device yet. Connect GitHub to download it.'));
+  }
 }
 
 /* ---------------------------------------------------------------- editor */
-async function flush() {
-  clearTimeout(saveT);
+async function doFlush() {
   if (!dirtyEd || !S.current || S.kind !== 'text') return;
   dirtyEd = false;
   await M.saveText(S.current, ed.value);
   scheduleSync();
 }
-let saveT;
-const lazyPreview = debounce(() => { if (pane.dataset.mode !== 'edit') renderPreview(); }, 120);
-ed.addEventListener('input', () => { dirtyEd = true; clearTimeout(saveT); saveT = setTimeout(flush, 500); lazyPreview(); updateStats(); });
+/** Save pending edits. Calls are chained so an older save can never overwrite a newer one. */
+function flush() { clearTimeout(saveT); return flushing = flushing.then(doFlush).catch(console.error); }
+const lazyPreview = debounce(() => { if (pane.dataset.mode !== 'edit') renderPreview(); }, 150);
+ed.addEventListener('input', () => { dirtyEd = true; if (ed.value.trim()) S.fresh = null; clearTimeout(saveT); saveT = setTimeout(flush, 400); lazyPreview(); updateStats(); });
 ed.addEventListener('blur', flush);
 function updateStats() {
-  const s = $('#stats');
-  if (S.kind !== 'text') { s.textContent = ''; return; }
-  const words = (ed.value.match(/\S+/g) || []).length;
-  s.textContent = `${words} word${words === 1 ? '' : 's'}`;
+  const words = S.kind === 'text' ? (ed.value.match(/\S+/g) || []).length : -1;
+  $('#stats').textContent = words < 0 ? '' : `${words} word${words === 1 ? '' : 's'}`;
 }
+E.bindKeys(ed, () => S.current);
 
-function insertText(t) {
-  ed.focus();
-  if (!document.execCommand('insertText', false, t)) { ed.setRangeText(t, ed.selectionStart, ed.selectionEnd, 'end'); ed.dispatchEvent(new Event('input')); }
-}
-function wrap(l, r = l, ph = '') {
-  const s = ed.selectionStart, sel = ed.value.slice(s, ed.selectionEnd);
-  if (sel && ed.value.slice(s - l.length, s) === l && ed.value.slice(ed.selectionEnd, ed.selectionEnd + r.length) === r) {
-    ed.setSelectionRange(s - l.length, ed.selectionEnd + r.length); insertText(sel); ed.setSelectionRange(s - l.length, s - l.length + sel.length); return;
-  }
-  const body = sel || ph;
-  insertText(l + body + r);
-  ed.setSelectionRange(s + l.length, s + l.length + body.length);
-}
-function lineRange() {
-  const v = ed.value, s = ed.selectionStart, e = ed.selectionEnd;
-  const a = v.lastIndexOf('\n', s - 1) + 1; let b = v.indexOf('\n', e); if (b < 0) b = v.length;
-  return [a, b];
-}
-function linePrefix(pre) {
-  const [a, b] = lineRange(), lines = ed.value.slice(a, b).split('\n');
-  const all = lines.every(l => l.startsWith(pre));
-  const out = lines.map(l => all ? l.slice(pre.length) : pre + l).join('\n');
-  ed.setSelectionRange(a, b); insertText(out); ed.setSelectionRange(a, a + out.length);
-}
-function cycleHeading() {
-  const [a, b] = lineRange(), line = ed.value.slice(a, b), m = line.match(/^(#{1,5}) /);
-  const out = m ? (m[1].length >= 3 ? line.slice(m[0].length) : '#' + line) : '# ' + line;
-  ed.setSelectionRange(a, b); insertText(out);
-}
-function codeSnippet() {
-  const sel = ed.value.slice(ed.selectionStart, ed.selectionEnd);
-  if (sel.includes('\n')) { insertText('```\n' + sel + '\n```'); } else wrap('`', '`', 'code');
-}
-function linkSnippet() {
-  const s = ed.selectionStart, sel = ed.value.slice(s, ed.selectionEnd) || 'text';
-  insertText(`[${sel}](url)`);
-  ed.setSelectionRange(s + sel.length + 3, s + sel.length + 6);
-}
 function buildToolbar() {
   const b = (ic, title, run) => h('button', { class: 'icon', title, 'aria-label': title, onmousedown: e => e.preventDefault(), onclick: run }, icon(ic));
-  const att = b('clip', 'Attach file or photo', () => { const inp = $('#filePick'); inp.value = ''; inp.onchange = () => attach([...inp.files]); inp.click(); });
-  if (!U.isMarkdown(S.current)) { $('#toolbar').replaceChildren(att); return; }
+  const attachBtn = b('clip', 'Attach file or photo', () => { const inp = $('#filePick'); inp.value = ''; inp.onchange = () => attach([...inp.files]); inp.click(); });
+  if (!U.isMarkdown(S.current)) { $('#toolbar').replaceChildren(attachBtn); return; }
   $('#toolbar').replaceChildren(
-    b('bold', 'Bold (Ctrl+B)', () => wrap('**', '**', 'bold')), b('italic', 'Italic (Ctrl+I)', () => wrap('*', '*', 'italic')),
-    b('heading', 'Heading', cycleHeading), h('i', { class: 'sep' }),
-    b('list', 'Bulleted list', () => linePrefix('- ')), b('check', 'Checklist', () => linePrefix('- [ ] ')), b('quote', 'Quote', () => linePrefix('> ')),
-    b('code', 'Code', codeSnippet), b('link', 'Link (Ctrl+K)', linkSnippet), h('i', { class: 'sep' }),
-    att);
+    b('bold', 'Bold (Ctrl+B)', () => E.wrap(ed, '**', '**', 'bold')), b('italic', 'Italic (Ctrl+I)', () => E.wrap(ed, '*', '*', 'italic')),
+    b('heading', 'Heading', () => E.cycleHeading(ed)), h('i', { class: 'sep' }),
+    b('list', 'Bulleted list', () => E.linePrefix(ed, '- ')), b('check', 'Checklist', () => E.linePrefix(ed, '- [ ] ')), b('quote', 'Quote', () => E.linePrefix(ed, '> ')),
+    b('code', 'Code', () => E.codeSnippet(ed)), b('link', 'Link (Ctrl+K)', () => E.linkSnippet(ed)), h('i', { class: 'sep' }), attachBtn);
 }
 
+/** Store files in `attachments/` next to the note and insert a reference (markdown link or plain path). */
 async function attach(files) {
   if (!files.length || !S.current || S.kind !== 'text') return;
-  const dir = U.join(U.dirname(S.current), 'attachments');
-  const out = [];
-  for (const f of files) {
-    let name = U.sanitizeName(f.name || 'file') || 'file';
-    if (/^image\.\w+$/i.test(name)) name = `pasted-${stamp()}.${U.extOf(name)}`;
-    const p = U.uniquePath(U.join(dir, name), M.exists);
-    await M.create(p, f);
-    const url = mdUrl('attachments/' + U.basename(p));
-    if (!U.isMarkdown(S.current)) { out.push('attachments/' + U.basename(p)); continue; }
-    out.push(U.kindOf(p) === 'image' ? `![${U.stem(p)}](${url})` : `[${U.basename(p)}](${url})`);
-  }
-  insertText(out.join('\n') + '\n');
-  toast(files.length === 1 ? 'Attached' : `Attached ${files.length} files`);
+  const added = await addFiles(files, U.join(U.dirname(S.current), 'attachments'));
+  if (!added.length) return;
+  const md = U.isMarkdown(S.current);
+  E.insertText(ed, added.map(p => {
+    const rel = 'attachments/' + U.basename(p);
+    if (!md) return rel;
+    return U.kindOf(p) === 'image' ? `![${U.stem(p)}](${mdUrl(rel)})` : `[${U.basename(p)}](${mdUrl(rel)})`;
+  }).join('\n') + '\n');
+  toast(added.length === 1 ? 'Attached' : `Attached ${added.length} files`);
 }
 ed.addEventListener('paste', e => { const fs = [...(e.clipboardData?.files || [])]; if (fs.length && U.isNote(S.current)) { e.preventDefault(); attach(fs); } });
 ed.addEventListener('dragover', e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); });
 ed.addEventListener('drop', e => { if (e.dataTransfer.files.length && U.isNote(S.current)) { e.preventDefault(); attach([...e.dataTransfer.files]); } });
 
-ed.addEventListener('keydown', e => {
-  const mod = e.ctrlKey || e.metaKey;
-  if (mod && !e.shiftKey && !e.altKey) {
-    const k = e.key.toLowerCase();
-    if (k === 'b' && U.isMarkdown(S.current)) { e.preventDefault(); wrap('**', '**', 'bold'); return; }
-    if (k === 'i' && U.isMarkdown(S.current)) { e.preventDefault(); wrap('*', '*', 'italic'); return; }
-    if (k === 'k' && U.isMarkdown(S.current)) { e.preventDefault(); linkSnippet(); return; }
-  }
-  if (e.isComposing) return;
-  if (e.key === 'Tab') {
-    e.preventDefault();
-    const [a, b] = lineRange();
-    if (ed.selectionStart !== ed.selectionEnd || e.shiftKey) {
-      const lines = ed.value.slice(a, b).split('\n');
-      const out = lines.map(l => e.shiftKey ? l.replace(/^( {1,2}|\t)/, '') : '  ' + l).join('\n');
-      ed.setSelectionRange(a, b); insertText(out); ed.setSelectionRange(a, a + out.length);
-    } else insertText('  ');
-    return;
-  }
-  if (e.key === 'Enter' && !e.shiftKey && !mod && U.isNote(S.current) && ed.selectionStart === ed.selectionEnd) {
-    const v = ed.value, s = ed.selectionStart, ls0 = v.lastIndexOf('\n', s - 1) + 1, line = v.slice(ls0, s);
-    let m = line.match(/^(\s*)(?:([-*+])|(\d+)([.)]))\s+(\[[ xX]\]\s+)?(.*)$/);
-    if (m) {
-      e.preventDefault();
-      if (!m[6]) { ed.setSelectionRange(ls0, s); insertText(''); return; }       // empty item: leave the list
-      const marker = m[2] || `${+m[3] + 1}${m[4]}`;
-      insertText(`\n${m[1]}${marker} ${m[5] ? '[ ] ' : ''}`);
-      return;
-    }
-    m = line.match(/^(\s*>+)\s?(.*)$/);
-    if (m) { e.preventDefault(); if (!m[2]) { ed.setSelectionRange(ls0, s); insertText(''); } else insertText(`\n${m[1]} `); }
-  }
-});
-
 /* ---------------------------------------------------------------- markdown preview */
-const urlCache = new Map();
-async function blobUrl(path) {
-  const r = M.files.get(path);
-  const key = path + ':' + r.sha;
-  if (!urlCache.has(key)) urlCache.set(key, URL.createObjectURL(await M.getBlob(path)));
-  return urlCache.get(key);
-}
-function resolvePath(base, rel) {
-  rel = rel.split(/[?#]/)[0];
-  try { rel = decodeURIComponent(rel); } catch { /* keep raw */ }
-  const parts = rel.startsWith('/') ? [] : base.split('/').filter(Boolean);
-  for (const s of rel.split('/')) { if (s === '..') parts.pop(); else if (s && s !== '.') parts.push(s); }
-  return parts.join('/');
-}
-const isExternal = u => /^([a-z][a-z0-9+.-]*:|\/\/)/i.test(u);
-function findNote(name) {
-  const n = name.trim().toLowerCase();
-  return M.livePaths().find(p => U.isNote(p) && (p.toLowerCase() === n || p.toLowerCase() === n + '.md' || U.stem(p).toLowerCase() === n));
-}
 function renderPreview() {
   if (!S.current || !U.isMarkdown(S.current)) return;
-  const src = ed.value.replace(/\[\[([^\]\n|]+)(?:\|([^\]\n]+))?\]\]/g, (_, n, a) => `[${a || n}](#wiki/${encodeURIComponent(n.trim())})`);
-  const box = preview, base = U.dirname(S.current);
-  box.innerHTML = DOMPurify.sanitize(marked.parse(src, { gfm: true, breaks: true }));
-  for (const a of box.querySelectorAll('a[href]')) {
-    const href = a.getAttribute('href');
-    if (href.startsWith('#wiki/')) { const name = decodeURIComponent(href.slice(6)); a.classList.add('wiki'); a.dataset.wiki = name; if (!findNote(name)) a.classList.add('missing'); }
-    else if (isExternal(href)) { a.target = '_blank'; a.rel = 'noopener noreferrer'; }
-    else if (!href.startsWith('#')) { const p = resolvePath(base, href); if (M.exists(p)) a.dataset.local = p; }
-  }
-  for (const el of box.querySelectorAll('img[src], video[src], audio[src]')) {
-    const s = el.getAttribute('src');
-    if (isExternal(s)) continue;
-    const p = resolvePath(base, s);
-    if (M.exists(p)) { el.removeAttribute('src'); blobUrl(p).then(u => el.src = u).catch(() => { el.alt = 'Could not load ' + p; }); }
-  }
-  box.querySelectorAll('input[type=checkbox]').forEach((c, i) => { c.disabled = false; c.dataset.i = i; });
+  return P.render(preview, ed.value, S.current).catch(e => { console.error(e); preview.textContent = 'Preview unavailable. It needs to load once while online.'; });
 }
 preview.addEventListener('change', e => {
-  const c = e.target; if (c.type !== 'checkbox') return;
-  const re = /^([\s>]*(?:[-*+]|\d+[.)])\s+\[)([ xX])(\])/;
-  let pos = 0, idx = -1, fence = false;
-  for (const line of ed.value.split('\n')) {
-    if (/^\s*(```|~~~)/.test(line)) fence = !fence;
-    else if (!fence && re.test(line) && ++idx === +c.dataset.i) {
-      const at = pos + line.match(re)[1].length;
-      ed.setRangeText(c.checked ? 'x' : ' ', at, at + 1, 'preserve');
-      ed.dispatchEvent(new Event('input'));
-      return;
-    }
-    pos += line.length + 1;
-  }
+  const c = e.target;
+  if (c.type !== 'checkbox') return;
+  const at = P.taskMarkerPos(ed.value, +c.dataset.i);
+  if (at < 0) return;
+  ed.setRangeText(c.checked ? 'x' : ' ', at, at + 1, 'preserve');
+  ed.dispatchEvent(new Event('input'));
 });
 preview.addEventListener('click', async e => {
-  const a = e.target.closest('a'); if (!a) return;
+  const a = e.target.closest('a');
+  if (!a) return;
   if (a.dataset.local) { e.preventDefault(); openFile(a.dataset.local); }
   else if (a.dataset.wiki) {
     e.preventDefault();
-    const p = findNote(a.dataset.wiki);
+    const p = P.findNote(a.dataset.wiki);
     if (p) return openFile(p);
     if (await confirmBox({ title: 'Create note?', body: `“${a.dataset.wiki}” doesn’t exist yet.`, ok: 'Create' })) {
       const to = U.uniquePath(U.join(S.dir, U.sanitizeName(a.dataset.wiki) + '.txt'), M.exists);
       await M.create(to, ''); openFile(to);
     }
-  } else if (a.getAttribute('href')?.startsWith('#')) { e.preventDefault(); }
+  } else if (a.getAttribute('href')?.startsWith('#')) e.preventDefault();
 });
 
-/* ---------------------------------------------------------------- settings / connect */
-const ACCENTS = ['#6d5ae6', '#2f7de1', '#14a38b', '#3f9d3f', '#e8772e', '#e0457b'];
-async function openSettings(first) {
-  const old = G.getCfg();
-  const cfg = old || {};
-  return modal((d, close) => {
-    const repo = h('input', { value: cfg.owner ? `${cfg.owner}/${cfg.repo}` : '', placeholder: 'yourname/notes', autocomplete: 'off', spellcheck: 'false', autocapitalize: 'off' });
-    const token = h('input', { type: 'password', value: cfg.token || '', placeholder: 'github_pat_…', autocomplete: 'off', spellcheck: 'false' });
-    const branch = h('input', { value: cfg.branch || '', placeholder: 'default branch', autocapitalize: 'off', spellcheck: 'false' });
-    const root = h('input', { value: cfg.root || '', placeholder: 'whole repo', autocapitalize: 'off', spellcheck: 'false' });
-    const theme = h('select', {}, ['auto', 'light', 'dark'].map(t => h('option', { value: t, selected: prefs.theme === t }, t === 'auto' ? 'Match system' : t[0].toUpperCase() + t.slice(1))));
-    let accent = prefs.accent;
-    const sw = h('div', { class: 'swatches' }, ACCENTS.map(c => h('button', { type: 'button', class: c === accent ? 'on' : '', style: `background:${c};color:${c}`, 'aria-label': c, onclick: e => { accent = c; sw.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === e.currentTarget)); } })));
-    const err = h('div', { class: 'err' });
-    const save = h('button', { class: 'primary' }, G.configured() ? 'Save' : 'Connect');
-    const f = h('form', {
-      onsubmit: async e => {
-        e.preventDefault(); err.textContent = '';
-        prefs.theme = theme.value; prefs.accent = accent; ls.set('prefs', prefs); applyPrefs();
-        if (!repo.value.trim() && !token.value.trim()) { close(true); return; }
-        const r = G.parseRepo(repo.value);
-        if (!r) { err.textContent = 'Enter the repo as owner/name.'; return; }
-        if (!token.value.trim()) { err.textContent = 'Paste an access token.'; return; }
-        const next = { token: token.value.trim(), ...r, branch: branch.value.trim(), root: G.normRoot(root.value) };
-        save.disabled = true; save.textContent = 'Checking…';
-        try {
-          const info = await G.testConnection(next);
-          if (!next.branch) next.branch = '';
-          const changedRepo = old && (old.owner !== next.owner || old.repo !== next.repo || old.branch !== next.branch || old.root !== next.root);
-          if (changedRepo && !(await confirmBox({ title: 'Switch repository?', body: 'This device’s local copy will be replaced with the new repo. Changes not yet synced will be lost.', ok: 'Switch', danger: true }))) { save.disabled = false; save.textContent = 'Save'; return; }
-          if (changedRepo) { await M.wipe(); closeFile(); }
-          G.setCfg(next);
-          close(true);
-          toast(info.private ? 'Connected to your private repo' : 'Connected');
-          G.sync({ force: true });
-        } catch (ex) {
-          err.textContent = ex.status === 401 ? 'GitHub rejected that token.' : ex.status === 404 ? 'Repo not found — check the name, and that the token has access to it.' : ex.message || 'Could not connect';
-          save.disabled = false; save.textContent = G.configured() ? 'Save' : 'Connect';
-        }
-      },
-    },
-      h('div', { class: 'mbody' },
-        h('h3', {}, first ? 'Connect your notes repo' : 'Settings'),
-        h('p', {}, first ? 'Notes stay on this device and sync with a GitHub repo. You can also skip this and use the app offline for now.' : 'Sync and appearance.'),
-        h('label', { class: 'field' }, 'Repository', repo),
-        h('label', { class: 'field' }, 'Access token', token,
-          h('small', {}, 'Create a ', h('a', { href: 'https://github.com/settings/personal-access-tokens/new', target: '_blank', rel: 'noopener' }, 'fine-grained token'), ': pick only your notes repo, then Permissions → ', h('b', {}, 'Contents: Read and write'), '. It is stored only on this device.')),
-        h('details', {}, h('summary', { style: 'cursor:pointer;color:var(--muted);font-size:13px' }, 'Advanced'),
-          h('div', { style: 'display:grid;gap:12px;margin-top:10px' },
-            h('label', { class: 'field' }, 'Branch', branch),
-            h('label', { class: 'field' }, 'Folder inside the repo', root, h('small', {}, 'Only sync this subfolder, e.g. “notes”. Empty = whole repo.')))),
-        h('label', { class: 'field' }, 'Theme', theme),
-        h('div', { class: 'field' }, 'Accent colour', sw),
-        err),
-      h('div', { class: 'mfoot' },
-        old && h('button', { type: 'button', class: 'danger', style: 'margin-right:auto', onclick: async () => {
-          const n = M.pendingCount();
-          if (await confirmBox({ title: 'Disconnect and erase local copy?', body: n ? `${n} change${n > 1 ? 's' : ''} haven’t synced yet and will be lost. Your GitHub repo is untouched.` : 'Your GitHub repo is untouched.', ok: 'Erase', danger: true })) { G.setCfg(null); await M.wipe(); closeFile(); close(true); renderStatus(); }
-        } }, 'Disconnect'),
-        h('button', { type: 'button', class: 'ghost', onclick: () => close(null) }, first ? 'Later' : 'Close'), save));
-    d.append(f);
-  });
-}
-
 /* ---------------------------------------------------------------- sync scheduling & status */
-let syncT;
-function scheduleSync(ms = 4000) { if (!G.configured() || G.status.state === 'error') return; clearTimeout(syncT); syncT = setTimeout(() => G.sync(), ms); }
-async function syncNow() { await flush(); if (!G.configured()) return openSettings(true); G.sync({ force: true }); }
-function ago(t) { const s = (Date.now() - t) / 1000; return s < 10 ? 'just now' : s < 60 ? `${s | 0}s ago` : s < 3600 ? `${(s / 60) | 0}m ago` : s < 86400 ? `${(s / 3600) | 0}h ago` : `${(s / 86400) | 0}d ago`; }
+let syncT, pollT, lastResume = 0;
+/** Push local edits soon (debounced). */
+function scheduleSync(ms = 2500) {
+  if (!G.configured() || G.status.fatal) return;
+  clearTimeout(syncT); syncT = setTimeout(() => G.sync(), ms);
+}
+async function syncNow() {
+  await flush();
+  if (!G.configured()) return openSettings(true, settingsCtx);
+  if (G.status.state === 'error' && G.status.fatal) return openSettings(false, settingsCtx);
+  G.sync({ force: true });
+}
+/** Check for remote changes when the app comes back to the foreground. Cheap: one conditional request. */
+function resumeSync() {
+  if (Date.now() - lastResume < 8000) return;
+  lastResume = Date.now();
+  G.sync(); swReg?.update().catch(() => {});
+}
+function schedulePoll() {
+  clearTimeout(pollT);
+  if (!prefs.poll || !G.configured()) return;
+  const s = navigator.connection?.saveData ? Math.max(prefs.poll, 300) : prefs.poll;
+  pollT = setTimeout(async () => { if (document.visibilityState === 'visible') await G.sync(); schedulePoll(); }, s * 1000);
+}
+const ago = t => { const s = (Date.now() - t) / 1000; return s < 10 ? 'just now' : s < 60 ? `${s | 0}s ago` : s < 3600 ? `${(s / 60) | 0}m ago` : s < 86400 ? `${(s / 3600) | 0}h ago` : `${(s / 86400) | 0}d ago`; };
 function renderStatus() {
-  const st = G.status, n = M.pendingCount(), el = $('#status');
-  let s = 'idle', text = '';
-  if (!G.configured()) { s = 'off'; text = n ? `Local only · ${n} unsaved to GitHub` : 'Local only — tap to connect GitHub'; }
+  const st = G.status, n = M.pendingCount(), el = $('#status'), on = G.configured();
+  let s = 'idle', text;
+  if (!on) { s = 'off'; text = n ? 'Local only. Tap to connect GitHub' : 'Not connected. Tap to connect GitHub'; }
   else if (st.state === 'syncing') { s = 'syncing'; text = st.msg || 'Syncing…'; }
   else if (st.state === 'error') { s = 'error'; text = st.msg; }
-  else if (st.state === 'offline') { s = 'pending'; text = `Offline${n ? ` · ${n} pending` : ''}`; }
+  else if (st.state === 'offline') { s = 'pending'; text = `Offline${n ? ` · ${n} change${n > 1 ? 's' : ''} waiting` : ''}`; }
   else if (n) { s = 'pending'; text = `${n} change${n > 1 ? 's' : ''} to sync`; }
-  else { text = st.at ? `Synced ${ago(st.at)}` : 'Up to date'; }
-  $('#emptyConnect').hidden = G.configured();
+  else text = st.at ? `Synced ${ago(st.at)}` : 'Up to date';
   el.dataset.s = s; el.title = text; el.lastChild.textContent = text;
-  $('#btnSync').classList.toggle('spin', st.state === 'syncing');
+  for (const b of [$('#btnSync'), $('#btnSync2')]) { b.classList.toggle('spin', st.state === 'syncing'); b.classList.toggle('pending', on && n > 0 && st.state !== 'syncing'); }
 }
 G.onStatus(() => { renderStatus(); if (G.status.state !== 'syncing') renderTree(); });
 setInterval(renderStatus, 30000);
-setInterval(() => { if (document.visibilityState === 'visible' && G.configured()) G.sync(); }, 60000);
 addEventListener('online', () => G.sync());
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); else G.sync(); });
+addEventListener('focus', resumeSync);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flush().then(() => { if (M.pendingCount()) G.sync(); });   // push before the OS freezes us
+  else { resumeSync(); renderStatus(); }
+});
 addEventListener('pagehide', flush);
 
 /* model changes (local edits, sync downloads) */
-let raf;
-M.subscribe(() => {
+let raf, needTree = false;
+M.subscribe(kind => {
+  needTree ||= kind !== 'content';
   cancelAnimationFrame(raf);
   raf = requestAnimationFrame(() => {
-    renderTree(); renderStatus();
+    if (needTree) renderTree();
+    needTree = false;
+    renderStatus();
     if (M.pendingCount()) scheduleSync();
     const p = S.current; if (!p) return;
     const r = M.files.get(p);
     if (!r || r.deleted) { closeFile(); return; }
     syncHeader();
-    if (S.kind === 'text' && !dirtyEd && typeof r.content === 'string' && r.content !== ed.value) {
+    if (S.kind === 'text' && !dirtyEd && typeof r.content === 'string' && r.content !== ed.value) {   // updated by a sync
       const [a, b] = [ed.selectionStart, ed.selectionEnd];
       ed.value = r.content; ed.setSelectionRange(Math.min(a, r.content.length), Math.min(b, r.content.length));
-      if (pane.dataset.mode !== 'edit') renderPreview(); updateStats();
+      if (pane.dataset.mode !== 'edit') renderPreview();
+      updateStats();
     } else if (S.kind !== 'text' && r.sha !== S.shownSha) { S.shownSha = r.sha; renderViewer(p, S.kind); }
   });
 });
 
-/* ---------------------------------------------------------------- navigation (mobile drawer) */
-const closeNav = () => document.body.classList.remove('nav-open');
-$('#btnMenu').addEventListener('click', () => document.body.classList.add('nav-open'));
+/* ---------------------------------------------------------------- global UI wiring */
+const settingsCtx = {
+  onWiped: () => { closeFile(); renderTree(); renderStatus(); },
+  onConnected: () => { renderStatus(); schedulePoll(); $('#emptyConnect').hidden = true; },
+  onPollChanged: schedulePoll,
+};
+$('#btnMenu').addEventListener('click', openNav);
 $('#scrim').addEventListener('click', closeNav);
 addEventListener('keydown', e => {
+  const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
   if (e.key === 'Escape') { closeNav(); hideMenu(); }
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); syncNow(); }
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'e' && S.kind === 'text' && U.isMarkdown(S.current)) { e.preventDefault(); S.mode = effMode() === 'edit' ? (wide.matches ? 'split' : 'preview') : 'edit'; ls.set('mode', S.mode); applyMode(); }
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && !e.shiftKey && document.activeElement !== ed) { e.preventDefault(); document.body.classList.add('nav-open'); $('#q').focus(); }
+  if (mod && k === 's') { e.preventDefault(); syncNow(); }
+  if (mod && k === 'e' && S.kind === 'text' && U.isMarkdown(S.current)) { e.preventDefault(); S.mode = effMode() === 'edit' ? (wide.matches ? 'split' : 'preview') : 'edit'; ls.set('mode', S.mode); applyMode(); }
+  if (mod && k === 'f' && !e.shiftKey && document.activeElement !== ed) { e.preventDefault(); openNav(); $('#q').focus(); }
 });
+
+/* ---------------------------------------------------------------- launch intents (share sheet, shortcut) */
+async function handleLaunch() {
+  const q = new URLSearchParams(location.search);
+  if (![...q.keys()].length) return false;
+  history.replaceState(null, '', location.pathname);
+  if (q.has('new')) { await newNote(''); return true; }
+  const title = q.get('title') || '', text = q.get('text') || '', url = q.get('url') || '';
+  if (!title && !text && !url) return false;
+  const body = [text, url].filter(Boolean).join('\n') || title;
+  const name = U.sanitizeName((title || body.split('\n')[0]).slice(0, 60)) || 'Shared';
+  const p = U.uniquePath(`${name}.txt`, M.exists);
+  await M.create(p, body + '\n');
+  await openFile(p);
+  toast('Saved to your notes');
+  return true;
+}
+
+/* ---------------------------------------------------------------- service worker: auto-update */
+function setupServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  let seenController = !!navigator.serviceWorker.controller, reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', async () => {
+    if (!seenController) { seenController = true; return; }     // first install taking control: nothing to replace
+    if (reloading) return;
+    reloading = true;
+    await flush();                                               // never lose typing to an update
+    location.reload();
+  });
+  navigator.serviceWorker.register('sw.js').then(reg => { swReg = reg; reg.update().catch(() => {}); }).catch(() => {});
+}
 
 /* ---------------------------------------------------------------- boot */
 async function boot() {
-  $('#btnSync').append(icon('sync')); $('#btnSettings').append(icon('sliders'));
-  $('#searchIcon').append(icon('search')); $('#btnMenu').append(icon('menu'));
-  $('#btnNote').append(icon('plus'), 'New note'); $('#btnFolder').append(icon('folderPlus')); $('#btnUpload').append(icon('upload'));
-  $('#btnPin').append(icon('star')); $('#btnMore').append(icon('more'));
-  $('#emptyNew').append(icon('plus'), 'New note');
+  const ic = (sel, ...nodes) => $(sel).append(...nodes);
+  ic('#btnSync', icon('sync')); ic('#btnSync2', icon('sync')); ic('#btnSettings', icon('sliders'));
+  ic('#searchIcon', icon('search')); ic('#btnMenu', icon('menu'));
+  ic('#btnNote', icon('plus'), 'New note'); ic('#btnFolder', icon('folderPlus')); ic('#btnUpload', icon('upload'));
+  ic('#btnPin', icon('star')); ic('#btnMore', icon('more')); ic('#emptyNew', icon('plus'), 'New note');
   applyPrefs();
+  bindPullToRefresh(treeEl, $('#ptr'), () => G.configured() ? G.sync({ force: true }) : openSettings(true, settingsCtx));
 
-  $('#btnSync').onclick = syncNow;
-  $('#status').onclick = syncNow;
-  $('#btnSettings').onclick = () => openSettings(false);
-  $('#emptyConnect').onclick = () => openSettings(true);
-  $('#btnNote').onclick = () => newNote();
-  $('#emptyNew').onclick = () => newNote();
+  $('#btnSync').onclick = $('#btnSync2').onclick = $('#status').onclick = syncNow;
+  $('#status').onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); syncNow(); } };
+  $('#btnSettings').onclick = () => openSettings(false, settingsCtx);
+  $('#emptyConnect').onclick = () => openSettings(true, settingsCtx);
+  $('#emptyList').onclick = openNav;
+  $('#btnNote').onclick = $('#emptyNew').onclick = () => newNote();
   $('#btnFolder').onclick = () => newFolder();
   $('#btnUpload').onclick = () => pickUpload();
   $('#btnPin').onclick = () => S.current && togglePin(S.current);
   $('#btnMore').onclick = e => { const b = e.currentTarget.getBoundingClientRect(); if (S.current) showMenu(fileMenu(S.current), b.right, b.bottom + 4, true); };
   $('#q').addEventListener('input', debounce(e => { S.q = e.target.value.trim(); renderTree(); }, 120));
+  $('#q').addEventListener('keydown', e => { if (e.key === 'Escape') { e.target.value = ''; S.q = ''; renderTree(); } });
 
   await M.load();
+  const launched = await handleLaunch();
   const last = ls.get('last', null);
-  if (last && M.exists(last)) { S.current = last; S.dir = U.dirname(last); await showFile(last); }
+  if (!launched && last && M.exists(last)) { S.current = last; S.dir = U.dirname(last); await showFile(last); }
   renderTree(); renderStatus();
-  if (G.configured()) G.sync();
-  else if (!localStorage.getItem('welcomed')) { localStorage.setItem('welcomed', '1'); openSettings(true); }
+  if (!S.current && narrow.matches) openNav();                   // on a phone, start at the list
+  if (G.configured()) { G.sync(); schedulePoll(); }
+  else if (!localStorage.getItem('welcomed')) { localStorage.setItem('welcomed', '1'); openSettings(true, settingsCtx); }
   $('#emptyConnect').hidden = G.configured();
-
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
-  if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
+  setupServiceWorker();
+  navigator.storage?.persist?.().catch(() => {});
 }
 boot();

@@ -4,18 +4,23 @@
 //     deleted?: true (tombstone, waiting to be pushed), mtime }
 // A record is "dirty" (needs pushing) when sha !== synced.
 import { db } from './db.js';
-import { enc, dirname, join, gitBlobSha, mimeOf } from './util.js';
+import { enc, dec, join, gitBlobSha, mimeOf, isText, isNote, isHidden } from './util.js';
 
 export const files = new Map();
 export const hooks = { fetchBlob: null };   // set by sync.js: sha -> ArrayBuffer
 const subs = new Set();
+/** kind: 'tree' (structure/other changes) or 'content' (only a note's text changed) */
 export const subscribe = f => (subs.add(f), () => subs.delete(f));
-export const emit = () => subs.forEach(f => f());
+export const emit = (kind = 'tree') => subs.forEach(f => f(kind));
+
+export const PINS = '.notes-app.json';
+/** Files we always keep downloaded: notes (searchable, editable offline) and the pins file. */
+export const isEager = p => p === PINS || (isNote(p) && !isHidden(p));
 
 export const isDirty = r => r.deleted ? !!r.synced : r.sha !== r.synced;
 export const pendingCount = () => { let n = 0; for (const r of files.values()) if (isDirty(r)) n++; return n; };
 export const exists = p => { const r = files.get(p); return !!r && !r.deleted; };
-export const livePaths = () => [...files.values()].filter(r => !r.deleted).map(r => r.path);
+export const livePaths = () => { const out = []; for (const r of files.values()) if (!r.deleted) out.push(r.path); return out; };
 export const dirExists = d => { const pre = d + '/'; for (const r of files.values()) if (!r.deleted && r.path.startsWith(pre)) return true; return false; };
 
 export const put = r => { files.set(r.path, r); return db.put(r); };
@@ -32,7 +37,7 @@ export async function saveText(path, text) {
   const cur = files.get(path);
   if (!cur || cur.deleted || (cur.sha === sha && cur.content === text)) return;
   await put({ ...cur, content: text, sha, mtime: Date.now() });
-  emit();
+  emit('content');
 }
 
 export async function create(path, content = '') {
@@ -53,6 +58,14 @@ export async function removeDir(dir) {
   for (const p of livePaths()) if (p.startsWith(dir + '/')) await removeOne(p);
   await prunePins(); emit();
 }
+/** Undo a delete: put snapshots of the removed records back. */
+export async function restore(records) {
+  for (const r of records) {
+    const old = files.get(r.path);
+    await put({ ...r, deleted: undefined, synced: old?.synced ?? null, mtime: Date.now() });
+  }
+  emit();
+}
 
 async function moveOne(from, to) {
   const r = files.get(from);
@@ -66,29 +79,31 @@ export async function moveDir(from, to) {
   for (const p of livePaths()) if (p.startsWith(from + '/')) await moveOne(p, to + p.slice(from.length));
   await remapPins(from, to); emit();
 }
-export async function makeDir(dir) { await create(join(dir, '.gitkeep'), ''); }
+export const makeDir = dir => create(join(dir, '.gitkeep'), '');
 
-// Binary content, downloading lazily from GitHub when needed.
-export async function getBlob(path) {
-  let r = files.get(path);
+/** Make sure a record's content is on this device (downloads it by blob sha if needed). */
+export async function ensureContent(path) {
+  const r = files.get(path);
   if (!r || r.deleted) throw new Error('File not found');
-  if (r.content == null) {
-    if (!hooks.fetchBlob) throw new Error('Not connected to GitHub');
-    const buf = await hooks.fetchBlob(r.sha);
-    const blob = new Blob([buf], { type: mimeOf(path) });
-    r = files.get(path);
-    if (r && !r.deleted && r.sha === (await gitBlobSha(new Uint8Array(buf)))) await put({ ...r, content: blob });
-    return blob;
-  }
-  return typeof r.content === 'string' ? new Blob([r.content], { type: mimeOf(path) }) : r.content.type ? r.content : new Blob([r.content], { type: mimeOf(path) });
+  if (r.content != null) return r;
+  if (!hooks.fetchBlob) throw new Error('Not connected to GitHub');
+  const buf = await hooks.fetchBlob(r.sha);
+  const content = isText(path) ? dec.decode(buf) : new Blob([buf], { type: mimeOf(path) });
+  const cur = files.get(path);
+  if (cur && !cur.deleted && cur.sha === r.sha && cur.content == null) { const n = { ...cur, content }; await put(n); return n; }
+  return { ...r, content };
+}
+export async function getBlob(path) {
+  const { content } = await ensureContent(path);
+  if (typeof content === 'string') return new Blob([content], { type: mimeOf(path) });
+  return content.type ? content : new Blob([content], { type: mimeOf(path) });
 }
 
 // ---- pins (stored in the repo so they sync between devices) ----
-export const PINS = '.notes-app.json';
 export function getPins() {
   const r = files.get(PINS);
   if (!r || r.deleted || typeof r.content !== 'string') return [];
-  try { return JSON.parse(r.content).pins || []; } catch { return []; }
+  try { const p = JSON.parse(r.content).pins; return Array.isArray(p) ? p : []; } catch { return []; }
 }
 export async function setPins(arr) {
   const text = JSON.stringify({ pins: arr }, null, 2) + '\n';
