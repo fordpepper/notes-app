@@ -3,6 +3,7 @@ import * as G from './sync.js';
 import * as U from './util.js';
 import * as P from './preview.js';
 import * as E from './editor-tools.js';
+import * as T from './media.js';
 import { $, h, debounce, ls, toast, stamp, mdUrl, fmtSize } from './dom.js';
 import { icon } from './icons.js';
 import { promptText, confirmBox, pickFolder, showMenu, hideMenu } from './dialogs.js';
@@ -39,7 +40,7 @@ function closeNav() {
 const saveExpanded = () => ls.set('expanded', [...S.expanded]);
 function expandTo(dir) { let p = ''; for (const s of dir.split('/').filter(Boolean)) { p = U.join(p, s); S.expanded.add(p); } saveExpanded(); }
 const displayName = p => U.isNote(p) ? U.stem(p) : U.basename(p);
-const fileIcon = p => U.kindOf(p) === 'image' ? 'image' : U.isNote(p) ? 'note' : 'file';
+const fileIcon = p => U.kindOf(p, M.files.get(p)) === 'image' ? 'image' : U.isNote(p) ? 'note' : 'file';
 
 function fileMenu(path) {
   const pinned = M.getPins().includes(path);
@@ -94,7 +95,7 @@ function renderTree() {
   if (pins.length) {
     frag.append(h('div', { class: 'sec' }, 'Pinned'));
     for (const p of pins) frag.append(row({ type: 'file', path: p, depth: 0, name: displayName(p), ico: fileIcon(p), active: p === S.current }));
-    frag.append(h('div', { class: 'sec' }, 'All notes'));
+    frag.append(h('div', { class: 'sec' }, 'Notes'));
   }
   const walk = (n, depth) => {
     for (const d of [...n.dirs.values()].sort((a, b) => U.naturalCmp(a.name, b.name))) {
@@ -232,6 +233,7 @@ async function addFiles(files, dir) {
   for (const f of files) {
     if (f.size > MAX_FILE) { toast(`“${f.name}” is over ${fmtSize(MAX_FILE)} and was skipped`); continue; }
     let name = U.sanitizeName(f.name || '') || 'file';
+    if (!U.extOf(name) && U.extForMime(f.type)) name += '.' + U.extForMime(f.type);   // e.g. a pasted picture without a name
     if (/^image\.\w+$/i.test(name)) name = `pasted-${stamp()}.${U.extOf(name)}`;
     const p = U.uniquePath(U.join(dir, name), M.exists);
     await M.create(p, f);
@@ -329,7 +331,12 @@ async function togglePin(path) {
 
 /* ---------------------------------------------------------------- main view */
 async function showFile(path) {
-  const r = M.files.get(path), k = U.kindOf(path);
+  const r = M.files.get(path);
+  let k = U.kindOf(path, r);
+  if (U.isAmbiguous(path) && !r.kind) {                              // no trustworthy extension: look at the content
+    try { k = await M.resolveKind(path); } catch { /* offline and not downloaded: fall back to the extension */ }
+    if (S.current !== path) return;
+  }
   S.kind = k; S.shownSha = r.sha;
   $('#main').classList.add('has-file');
   if (k === 'text') {
@@ -350,7 +357,7 @@ function syncHeader() {
   if (!p || !M.exists(p)) return;
   const note = U.isNote(p);
   if (document.activeElement !== titleEl) titleEl.value = note ? U.stem(p) : U.basename(p);
-  $('#crumb').textContent = U.dirname(p).split('/').filter(Boolean).join('  ›  ') || 'Top level';
+  $('#crumb').textContent = U.dirname(p).split('/').filter(Boolean).join('  ›  ') || 'Notes';
   const pinned = M.getPins().includes(p), pb = $('#btnPin');
   pb.classList.toggle('on', pinned); pb.title = pinned ? 'Unpin' : 'Pin to top'; pb.setAttribute('aria-label', pb.title); pb.hidden = !note;
   pb.firstChild.style.fill = pinned ? 'currentColor' : 'none';
@@ -376,21 +383,25 @@ function effMode() {
 function applyMode() {
   const m = effMode();
   pane.dataset.mode = m;
-  const modes = [['edit', 'pencil', 'Edit'], ...(wide.matches ? [['split', 'columns', 'Split']] : []), ['preview', 'eye', 'Preview']];
+  const all = [['edit', 'pencil', 'Edit'], ...(wide.matches ? [['split', 'columns', 'Split']] : []), ['preview', 'eye', 'Preview']];
+  const modes = narrow.matches ? all.filter(x => x[0] !== m) : all;     // phones: one button that flips to the other view
+  $('#modes').classList.toggle('single', narrow.matches);
   $('#modes').replaceChildren(...modes.map(([id, ic, label]) => h('button', { class: id === m ? 'on' : '', title: label, 'aria-label': label, 'aria-pressed': String(id === m), onclick: () => { S.mode = id; ls.set('mode', id); applyMode(); if (id === 'edit') ed.focus(); } }, icon(ic), h('span', {}, label))));
   if (m !== 'edit') renderPreview();
   $('#toolbar').hidden = !(U.isNote(S.current || '') && m !== 'preview');
 }
 wide.addEventListener('change', () => S.kind === 'text' && applyMode());
+narrow.addEventListener('change', () => S.kind === 'text' && applyMode());
 
 async function renderViewer(path, k) {
   const v = $('#viewer');
   v.replaceChildren(h('div', { class: 'filecard' }, 'Loading…'));
   const acts = h('div', { class: 'viewer-actions' }, h('button', { class: 'ghost', onclick: () => downloadFile(path) }, icon('download'), 'Download'));
   try {
-    const url = await P.blobUrl(path), r = M.files.get(path);
+    const r = M.files.get(path);
+    const url = k === 'image' ? await T.display(path) : await P.blobUrl(path);       // pictures: scaled-down version first
     if (S.current !== path) return;                                  // user moved on while it loaded
-    if (k === 'image') v.replaceChildren(h('img', { src: url, alt: U.basename(path) }), acts);
+    if (k === 'image') v.replaceChildren(h('img', { src: url, alt: U.basename(path), 'data-path': path, decoding: 'async' }), acts);
     else if (k === 'video') v.replaceChildren(h('video', { src: url, controls: true }), acts);
     else if (k === 'audio') v.replaceChildren(h('audio', { src: url, controls: true }), acts);
     else if (k === 'pdf') { acts.append(h('a', { class: 'ghost', href: url, target: '_blank', rel: 'noopener' }, 'Open in new tab')); v.replaceChildren(h('iframe', { src: url, title: U.basename(path) }), acts); }
@@ -414,7 +425,7 @@ ed.addEventListener('input', () => { dirtyEd = true; if (ed.value.trim()) S.fres
 ed.addEventListener('blur', flush);
 function updateStats() {
   const words = S.kind === 'text' ? (ed.value.match(/\S+/g) || []).length : -1;
-  $('#stats').textContent = words < 0 ? '' : `${words} word${words === 1 ? '' : 's'}`;
+  $('#stats').textContent = words < 0 ? '' : words === 0 ? 'Empty' : `${words} word${words === 1 ? '' : 's'}`;
 }
 E.bindKeys(ed, () => S.current);
 
@@ -445,6 +456,24 @@ async function attach(files) {
 ed.addEventListener('paste', e => { const fs = [...(e.clipboardData?.files || [])]; if (fs.length && U.isNote(S.current)) { e.preventDefault(); attach(fs); } });
 ed.addEventListener('dragover', e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); });
 ed.addEventListener('drop', e => { if (e.dataTransfer.files.length && U.isNote(S.current)) { e.preventDefault(); attach([...e.dataTransfer.files]); } });
+
+/* ---------------------------------------------------------------- picture lightbox */
+let lightbox = null;
+function closeLightbox() { lightbox?.remove(); lightbox = null; removeEventListener('keydown', lightboxKey, true); }
+function lightboxKey(e) { if (e.key === 'Escape') { e.stopPropagation(); closeLightbox(); } }
+/** Show the full-size picture. The scaled version is shown straight away while the original loads. */
+async function openLightbox(path, from) {
+  closeLightbox();
+  const img = h('img', { alt: U.basename(path), src: from || '' });
+  lightbox = h('div', { id: 'lightbox', role: 'dialog', 'aria-label': U.basename(path), onclick: closeLightbox }, img, h('button', { class: 'icon', 'aria-label': 'Close', onclick: closeLightbox }, icon('x')));
+  document.body.append(lightbox); addEventListener('keydown', lightboxKey, true);
+  try { const u = await T.blobUrl(path); if (lightbox?.contains(img)) { const full = new Image(); full.src = u; await full.decode().catch(() => {}); if (lightbox?.contains(img)) img.src = u; } }
+  catch (e) { toast('Could not load the picture: ' + e.message); }
+}
+document.addEventListener('click', e => {
+  const im = e.target.closest('#preview img[data-path], #viewer img[data-path]');
+  if (im) openLightbox(im.dataset.path, im.currentSrc || im.src);
+});
 
 /* ---------------------------------------------------------------- markdown preview */
 function renderPreview() {
@@ -595,9 +624,9 @@ function setupServiceWorker() {
 /* ---------------------------------------------------------------- boot */
 async function boot() {
   const ic = (sel, ...nodes) => $(sel).append(...nodes);
-  ic('#btnSync', icon('sync')); ic('#btnSync2', icon('sync')); ic('#btnSettings', icon('sliders'));
+  ic('#btnSync', icon('sync')); ic('#btnSync2', icon('sync')); ic('#btnSettings', icon('gear'));
   ic('#searchIcon', icon('search')); ic('#btnMenu', icon('menu'));
-  ic('#btnNote', icon('plus'), 'New note'); ic('#btnFolder', icon('folderPlus')); ic('#btnUpload', icon('upload'));
+  ic('#btnNote', icon('compose')); ic('#btnFolder', icon('folderPlus')); ic('#btnUpload', icon('upload'));
   ic('#btnPin', icon('star')); ic('#btnMore', icon('more')); ic('#emptyNew', icon('plus'), 'New note');
   applyPrefs();
   bindPullToRefresh(treeEl, $('#ptr'), () => G.configured() ? G.sync({ force: true }) : openSettings(true, settingsCtx));
@@ -624,7 +653,8 @@ async function boot() {
   if (G.configured()) { G.sync(); schedulePoll(); }
   else if (!localStorage.getItem('welcomed')) { localStorage.setItem('welcomed', '1'); openSettings(true, settingsCtx); }
   $('#emptyConnect').hidden = G.configured();
-  setupServiceWorker();
+  const idle = window.requestIdleCallback || (f => setTimeout(f, 1500));
+  idle(() => { setupServiceWorker(); T.prune(); });             // after first paint: nothing competes with startup
   navigator.storage?.persist?.().catch(() => {});
 }
 boot();

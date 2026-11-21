@@ -5,7 +5,7 @@ import { h, toast } from './dom.js';
 import { modal, confirmBox } from './dialogs.js';
 import { prefs, savePrefs, applyPrefs, ACCENTS } from './theme.js';
 
-const SIZES = [[15, 'Small'], [16, 'Medium'], [18, 'Large'], [20, 'Extra large']];
+const SIZES = [[15, 'Small'], [17, 'Medium'], [19, 'Large'], [21, 'Extra large']];
 const POLLS = [[60, 'Every minute'], [120, 'Every 2 minutes'], [300, 'Every 5 minutes'], [0, 'Only when I tap sync']];
 
 const select = (opts, current, onChange) => h('select', { onchange: e => onChange(e.target.value) },

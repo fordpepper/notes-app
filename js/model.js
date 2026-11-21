@@ -4,7 +4,7 @@
 //     deleted?: true (tombstone, waiting to be pushed), mtime }
 // A record is "dirty" (needs pushing) when sha !== synced.
 import { db } from './db.js';
-import { enc, dec, join, gitBlobSha, mimeOf, isText, isNote, isHidden } from './util.js';
+import { enc, dec, join, gitBlobSha, mimeOf, isText, isNote, isHidden, isAmbiguous, kindOf, sniff, looksText } from './util.js';
 
 export const files = new Map();
 export const hooks = { fetchBlob: null };   // set by sync.js: sha -> ArrayBuffer
@@ -88,15 +88,35 @@ export async function ensureContent(path) {
   if (r.content != null) return r;
   if (!hooks.fetchBlob) throw new Error('Not connected to GitHub');
   const buf = await hooks.fetchBlob(r.sha);
-  const content = isText(path) ? dec.decode(buf) : new Blob([buf], { type: mimeOf(path) });
+  const content = isText(path) && !isAmbiguous(path) ? dec.decode(buf) : new Blob([buf], { type: mimeOf(path) });
   const cur = files.get(path);
   if (cur && !cur.deleted && cur.sha === r.sha && cur.content == null) { const n = { ...cur, content }; await put(n); return n; }
   return { ...r, content };
 }
 export async function getBlob(path) {
-  const { content } = await ensureContent(path);
-  if (typeof content === 'string') return new Blob([content], { type: mimeOf(path) });
-  return content.type ? content : new Blob([content], { type: mimeOf(path) });
+  const { content, mime } = await ensureContent(path);
+  const type = mime || mimeOf(path);
+  if (typeof content === 'string') return new Blob([content], { type });
+  return content.type && content.type !== 'application/octet-stream' ? content : new Blob([content], { type });
+}
+
+/**
+ * What is this file? Trusts well-known extensions; for a missing or unusual extension it looks at the
+ * content (magic bytes), so a picture displays as a picture even if it isn't called *.png. Remembered on the record.
+ */
+export async function resolveKind(path) {
+  const r0 = files.get(path);
+  if (!r0 || r0.deleted) throw new Error('File not found');
+  if (r0.kind || !isAmbiguous(path)) return kindOf(path, r0);
+  const r = await ensureContent(path), c = r.content;
+  const bytes = typeof c === 'string' ? enc.encode(c.slice(0, 4096)) : new Uint8Array(await c.slice(0, 4096).arrayBuffer());
+  const s = sniff(bytes), kind = s ? s.kind : looksText(bytes) ? 'text' : 'other', mime = s?.mime;
+  let content = c;
+  if (kind === 'text' && typeof c !== 'string') content = dec.decode(await c.arrayBuffer());
+  else if (mime && typeof c !== 'string') content = new Blob([c], { type: mime });
+  const cur = files.get(path);
+  if (cur && !cur.deleted && cur.sha === r.sha) await put({ ...cur, content, kind, mime });
+  return kind;
 }
 
 // ---- pins (stored in the repo so they sync between devices) ----

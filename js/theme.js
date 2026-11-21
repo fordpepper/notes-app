@@ -3,9 +3,10 @@ import { ls } from './dom.js';
 
 export const DEFAULT_ACCENT = '#0e8f7e';
 export const ACCENTS = ['#0e8f7e', '#2f7de1', '#5b6cf0', '#8b5cf6', '#e0457b', '#e8672e', '#d99a14', '#3da35d'];
-export const prefs = { theme: 'auto', accent: DEFAULT_ACCENT, size: 16, poll: 120, ...ls.get('prefs', {}) };
+export const prefs = { theme: 'auto', accent: DEFAULT_ACCENT, size: 17, poll: 120, ...ls.get('prefs', {}) };
 // v1 prefs saved the old default purple; move those to the new default (a deliberately chosen colour is kept).
-if (!prefs.v) { if (prefs.accent === '#6d5ae6') prefs.accent = DEFAULT_ACCENT; prefs.v = 2; ls.set('prefs', prefs); }
+if (!prefs.v) { if (prefs.accent === '#6d5ae6') prefs.accent = DEFAULT_ACCENT; prefs.v = 2; }
+if (prefs.v < 3) { prefs.size = { 15: 15, 16: 17, 18: 19, 20: 21 }[prefs.size] ?? 17; prefs.v = 3; ls.set('prefs', prefs); }   // text sizes moved up one notch
 export const savePrefs = () => ls.set('prefs', prefs);
 
 const rgb = c => [1, 3, 5].map(i => parseInt(c.slice(i, i + 2), 16));

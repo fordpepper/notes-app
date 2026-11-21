@@ -9,7 +9,9 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
+<script>try{var p=JSON.parse(localStorage.getItem('prefs')||'{}'),r=document.documentElement;if(p.theme&&p.theme!=='auto')r.dataset.theme=p.theme;if(/^#[0-9a-f]{6}$/i.test(p.accent))r.style.setProperty('--accent',p.accent)}catch(e){}</script>
 <link rel="stylesheet" href="style.css">
+<link rel="modulepreload" href="js/app.js"><link rel="modulepreload" href="js/model.js"><link rel="modulepreload" href="js/sync.js"><link rel="modulepreload" href="js/util.js"><link rel="modulepreload" href="js/dom.js"><link rel="modulepreload" href="js/db.js"><link rel="modulepreload" href="js/icons.js"><link rel="modulepreload" href="js/dialogs.js"><link rel="modulepreload" href="js/theme.js"><link rel="modulepreload" href="js/settings.js"><link rel="modulepreload" href="js/preview.js"><link rel="modulepreload" href="js/media.js"><link rel="modulepreload" href="js/editor-tools.js">
 </head>
 <body>
 <!-- Logo: colours follow the accent setting -->
@@ -33,29 +35,33 @@
 <div id="app">
   <aside id="side" aria-label="Notes list">
     <header class="side-head">
-      <div class="brand"><svg class="logo" width="24" height="24" aria-hidden="true"><use href="#logo"/></svg><span>Notes</span></div>
-      <button id="btnSync" class="icon" title="Sync now (Ctrl+S)" aria-label="Sync now"></button>
       <button id="btnSettings" class="icon" title="Settings" aria-label="Settings"></button>
+      <h1>Notes</h1>
+      <button id="btnNote" class="icon accent" title="New note" aria-label="New note"></button>
     </header>
-    <div class="search"><span id="searchIcon"></span><input id="q" type="search" placeholder="Search notes…" autocomplete="off" aria-label="Search notes"></div>
-    <div class="actions">
-      <button id="btnNote" class="primary"></button>
-      <button id="btnFolder" class="ghost" title="New folder" aria-label="New folder"></button>
-      <button id="btnUpload" class="ghost" title="Upload files" aria-label="Upload files"></button>
-    </div>
+    <div class="search"><span id="searchIcon"></span><input id="q" type="search" placeholder="Search" autocomplete="off" aria-label="Search notes"></div>
     <div id="ptr" aria-hidden="true"></div>
     <nav id="tree" aria-label="Notes"></nav>
-    <footer id="status" role="button" tabindex="0" title="Sync now"><i class="dot"></i><span></span></footer>
+    <footer id="foot">
+      <div id="status" role="button" tabindex="0" title="Sync now"><i class="dot"></i><span></span></div>
+      <button id="btnFolder" class="icon" title="New folder" aria-label="New folder"></button>
+      <button id="btnUpload" class="icon" title="Upload files" aria-label="Upload files"></button>
+      <button id="btnSync" class="icon" title="Sync now (Ctrl+S)" aria-label="Sync now"></button>
+    </footer>
   </aside>
   <div id="scrim"></div>
   <main id="main">
     <div id="topbar">
-      <button id="btnMenu" class="icon" title="Notes" aria-label="Show notes list"></button>
-      <div id="crumb"></div>
-      <button id="btnSync2" class="icon" title="Sync now" aria-label="Sync now"></button>
-      <div id="modes" class="seg"></div>
-      <button id="btnPin" class="icon" title="Pin" aria-label="Pin"></button>
-      <button id="btnMore" class="icon" title="More" aria-label="More actions"></button>
+      <div class="tb-l">
+        <button id="btnMenu" class="icon" title="Notes" aria-label="Show notes list"></button>
+        <button id="btnSync2" class="icon" title="Sync now" aria-label="Sync now"></button>
+      </div>
+      <div class="tb-c"><div id="crumb"></div><div id="stats"></div></div>
+      <div class="tb-r">
+        <div id="modes" class="seg"></div>
+        <button id="btnPin" class="icon" title="Pin" aria-label="Pin"></button>
+        <button id="btnMore" class="icon" title="More" aria-label="More actions"></button>
+      </div>
     </div>
     <div id="doc">
       <div id="titlebar"><input id="title" spellcheck="false" autocomplete="off" placeholder="Untitled" aria-label="Note title"></div>
@@ -65,14 +71,13 @@
         <div id="viewer"></div>
       </div>
       <div id="toolbar"></div>
-      <div id="stats"></div>
     </div>
     <div id="empty">
       <div class="empty-card">
-        <svg class="logo big" width="72" height="72" aria-hidden="true"><use href="#logo"/></svg>
-        <h2>Your notes</h2>
+        <svg class="logo big" width="64" height="64" aria-hidden="true"><use href="#logo"/></svg>
+        <h2>Notes</h2>
         <p id="emptyMsg">Pick a note from the list, or start a new one.</p>
-        <div class="row-btns"><button id="emptyNew" class="primary"></button><button id="emptyList" class="ghost">Browse notes</button><button id="emptyConnect" class="ghost">Connect GitHub</button></div>
+        <div class="row-btns"><button id="emptyNew" class="primary"></button><button id="emptyList" class="link">Browse notes</button><button id="emptyConnect" class="link">Connect GitHub</button></div>
       </div>
     </div>
   </main>

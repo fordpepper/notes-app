@@ -6,7 +6,7 @@ app on Android, Windows, Linux and ChromeOS. Offline-first, no backend: the app 
 **Features**
 - **Sync** with a private repo: pull + one commit per push, conflict-safe, works offline and catches up later.
 - **Folders**: create, rename, move (drag & drop, or *Move to…* on touch), delete with **Undo**. Your repo layout is shown as-is.
-- **Files**: upload anything, attach files to notes (paste/drag them in), images/PDF/audio/video open in-app.
+- **Files**: upload anything, attach files to notes (paste/drag them in), images/PDF/audio/video open in-app. Pictures are recognised by their content, so they display even without a `.png`/`.jpg` ending.
 - **Editor**: plain text with list continuation, pins, search. `.md` files in the repo still open with a toolbar and live preview.
 - **Phone**: sync button in the top bar, pull-down-to-refresh on the list, auto-sync when you open or leave the app,
   share text from any app into Notes (installed app), "New note" home-screen shortcut.
@@ -37,6 +37,7 @@ background and reloads once, automatically (your typing is saved first). Nothing
 | Nothing changed (open app, every 2 min while open) | 1 conditional request, answered `304 Not Modified` (headers only) |
 | You edited notes | blobs + tree + commit + ref update. No repo listing |
 | Someone else changed the repo | ref + commit + one tree listing + **only the changed files** |
+| Big pictures | decoded once into a ~1280 px WebP kept on the device; lists and previews use that, the original opens on tap |
 | First sync | all notes are downloaded; images, PDFs and other files only when you open them |
 
 The markdown libraries (~45 KB gzipped) load only when you open a `.md` file. The check interval is configurable

@@ -1,20 +1,13 @@
 // Markdown preview. marked + DOMPurify (~45 KB gzipped) are only downloaded when a .md file is previewed.
 import * as M from './model.js';
 import * as U from './util.js';
+import { blobUrl, peek, display } from './media.js';
 
 let libs;
 const loadLibs = () => libs ??= Promise.all([import('../vendor/marked.js'), import('../vendor/purify.js')])
   .then(([m, p]) => ({ marked: m.marked, DOMPurify: p.default }));
 
-const urlCache = new Map();
-/** Object URL for a stored file (cached per content version). */
-export async function blobUrl(path) {
-  const r = M.files.get(path);
-  if (!r || r.deleted) throw new Error('File not found');
-  const key = path + ':' + r.sha;
-  if (!urlCache.has(key)) urlCache.set(key, URL.createObjectURL(await M.getBlob(path)));
-  return urlCache.get(key);
-}
+export { blobUrl };
 
 export function resolvePath(base, rel) {
   rel = rel.split(/[?#]/)[0];
@@ -29,6 +22,12 @@ export function findNote(name) {
   const n = name.trim().toLowerCase();
   return M.livePaths().find(p => U.isNote(p) && !U.isHidden(p) && (p.toLowerCase() === n || p.toLowerCase() === n + '.md' || p.toLowerCase() === n + '.txt' || U.stem(p).toLowerCase() === n));
 }
+
+const io = 'IntersectionObserver' in window ? new IntersectionObserver(es => {
+  for (const e of es) if (e.isIntersecting) { io.unobserve(e.target); load(e.target, e.target.dataset.path); }
+}, { rootMargin: '600px 0px' }) : null;
+const load = (el, p) => display(p).then(u => { if (el.isConnected || !el.src) el.src = u; }).catch(() => { el.alt = 'Could not load ' + p; el.classList.add('ready'); });
+const watch = (el, p) => io ? io.observe(el) : load(el, p);
 
 let seq = 0;
 /** Render markdown `src` (belonging to note `path`) into `box`. */
@@ -45,11 +44,22 @@ export async function render(box, src, path) {
     else if (isExternal(href)) { a.target = '_blank'; a.rel = 'noopener noreferrer'; }
     else if (!href.startsWith('#')) { const p = resolvePath(base, href); if (M.exists(p)) a.dataset.local = p; }
   }
-  for (const el of box.querySelectorAll('img[src], video[src], audio[src]')) {
+  for (const el of box.querySelectorAll('img, video[src], audio[src]')) {
     const s = el.getAttribute('src');
-    if (isExternal(s)) continue;
+    if (el.localName === 'img') {
+      el.decoding = 'async';
+      const show = () => el.classList.add('ready');
+      el.addEventListener('load', show); el.addEventListener('error', show);
+      if (el.complete && el.naturalWidth) show();
+    }
+    if (!s || isExternal(s)) { if (el.localName === 'img') el.loading = 'lazy'; continue; }
     const p = resolvePath(base, s);
-    if (M.exists(p)) { el.removeAttribute('src'); blobUrl(p).then(u => { el.src = u; }).catch(() => { el.alt = 'Could not load ' + p; }); }
+    if (!M.exists(p)) continue;
+    el.removeAttribute('src');
+    if (el.localName !== 'img') { blobUrl(p).then(u => { el.src = u; }).catch(() => {}); continue; }
+    el.dataset.path = p;
+    const known = peek(p);
+    if (known) el.src = known; else watch(el, p);            // pictures load (scaled down) when they come into view
   }
   box.querySelectorAll('input[type=checkbox]').forEach((c, i) => { c.disabled = false; c.dataset.i = i; });
 }

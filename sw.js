@@ -4,10 +4,10 @@
 //  - vendor/ libraries live in their own long-lived cache so updates don't re-download them
 const BUILD = '__BUILD__';
 const DEV = BUILD.startsWith('__');          // local development: always try the network first
-const APP = `notes-app-${BUILD}`, LIB = 'notes-lib-v1';
+const APP = `notes-app-${BUILD}`, LIB = 'notes-lib-v1', KEEP = new Set([APP, LIB, 'notes-thumbs-v1']);   // thumbnails survive updates
 const SHELL = ['./', 'index.html', 'style.css', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png',
   'js/app.js', 'js/db.js', 'js/model.js', 'js/sync.js', 'js/util.js', 'js/dom.js', 'js/icons.js', 'js/theme.js',
-  'js/dialogs.js', 'js/settings.js', 'js/preview.js', 'js/editor-tools.js'];
+  'js/dialogs.js', 'js/settings.js', 'js/preview.js', 'js/media.js', 'js/editor-tools.js'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(APP).then(c => c.addAll(SHELL.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
@@ -15,7 +15,7 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.filter(k => k !== APP && k !== LIB).map(k => caches.delete(k)));
+    await Promise.all(keys.filter(k => !KEEP.has(k)).map(k => caches.delete(k)));
     await self.clients.claim();
     // One-time migration: pages running the very first app version can't reload themselves after an update, so do it for them.
     if (keys.includes('notes-v1')) for (const c of await self.clients.matchAll({ type: 'window' })) c.navigate(c.url).catch(() => {});
