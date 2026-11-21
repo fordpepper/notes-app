@@ -87,7 +87,7 @@ await p.screenshot({ path: `${SHOTS}/d3-code.png` });
 await open('page.html'); await p.waitForSelector('#preview iframe.htmlview');
 ok('html renders in a sandboxed frame', (await p.locator('iframe.htmlview').getAttribute('sandbox')) === '' && (await p.frameLocator('iframe.htmlview').locator('h1').innerText()) === 'Hello page');
 
-await open('Guide'); await p.waitForSelector('#preview pre code .tk-k');
+await open('Guide'); await p.click('#modes button[title=Preview]'); await p.waitForSelector('#preview pre code .tk-k');
 ok('markdown code blocks are highlighted', true);
 
 await open('report.docx'); await p.waitForSelector('#viewer .docpage');
@@ -115,30 +115,21 @@ if (await off() > 1.5) bad.push('long title');
 await p.keyboard.press('Escape');
 ok('top bar title is centred for every file type', bad.length === 0, bad.join(','));
 
-// ---- hide / show parts of the UI, collapse the list, focus mode ----
+// ---- settings stay small; collapse the list, focus mode ----
 await open('Guide');
 await p.click('#btnSettings');
-const parts = { search: '.search', actions: '#btnFolder', icons: '.row .fi', status: '#status', stats: '#stats', toolbar: '#toolbar' };
-for (const [k, sel] of Object.entries(parts)) {
-  await p.click(`.switch[data-part="${k}"]`);
-  const vis = await p.evaluate(s => { const e = document.querySelector(s); const c = getComputedStyle(e); return c.display !== 'none' && c.visibility !== 'hidden'; }, sel);
-  ok(`can hide: ${k}`, !vis);
-  await p.click(`.switch[data-part="${k}"]`);
-}
-await p.click('.pal[data-id="custom"]'); await p.waitForSelector('.seed input[type=color]');
+ok('settings are short: theme, accent, size, font, sync interval', await p.locator('dialog .chips').count() === 4 && await p.locator('dialog .switch').count() === 0);
 const before = await p.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--primary').trim());
-await p.locator('.seed input[type=color]').first().fill('#d81b60');
-ok('custom palette: own colours drive the scheme', await p.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--primary').trim()) !== before);
-await p.click('.chip:text-is("Wide")'); await p.click('.chip:text-is("Extra round")'); await p.click('.chip:text-is("Compact")');
-ok('width, corners and density are variables', await p.evaluate(() => { const c = getComputedStyle(document.documentElement); return c.getPropertyValue('--content-w').trim() === '960px' && +c.getPropertyValue('--shape') > 1 && c.getPropertyValue('--row-h').trim() === '40px'; }));
-await p.click('.pal[data-id="teal"]'); await p.click('.chip:text-is("Comfortable") >> nth=1'); await p.click('.chip:text-is("Rounded")'); await p.click('dialog button:has-text("Close")');
+await p.locator('.pal.custom input').fill('#d81b60');
+ok('custom accent colour', await p.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--primary').trim()) !== before);
+await p.click('.pal[data-id="teal"]'); await p.click('dialog button:has-text("Close")');
 await p.click('#btnMenu');
 ok('desktop: notes list can be collapsed', await p.locator('#side').isHidden());
 ok('title still centred with the list collapsed', await off() < 1.5);
 await p.click('#btnMenu');
 ok('…and brought back', await p.locator('#side').isVisible());
 await p.click('#btnMore'); await p.click('#menu button:has-text("Focus mode")');
-ok('focus mode hides list and toolbar', await p.locator('#side').isHidden() && await p.locator('#toolbar').isHidden());
+ok('focus mode hides the list', await p.locator('#side').isHidden());
 await p.keyboard.press('Escape');
 ok('Esc leaves focus mode', await p.locator('#side').isVisible());
 ok('no console errors', errors.length === 0, errors.join(' | '));

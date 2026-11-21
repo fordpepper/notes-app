@@ -17,7 +17,7 @@ export const PALETTES = {
   graphite: { name: 'Graphite', seeds: ['#6b6f76'] },
 };
 export const VIBRANCE = [['muted', 'Muted', .55], ['normal', 'Balanced', 1], ['vivid', 'Vivid', 1.3]];
-export const WIDTHS = [['narrow', 'Narrow', 600], ['normal', 'Comfortable', 720], ['wide', 'Wide', 960], ['full', 'Full', 99999]];
+export const WIDTHS = [['narrow', 'Narrow', 600], ['normal', 'Comfortable', 680], ['wide', 'Wide', 960], ['full', 'Full', 99999]];
 export const FONTS = [['sans', 'Sans'], ['serif', 'Serif'], ['mono', 'Mono']];
 export const SPACING = [['tight', 'Tight', 1.42], ['normal', 'Normal', 1.6], ['relaxed', 'Relaxed', 1.82]];
 export const SHAPES = [['sharp', 'Sharp', .45], ['normal', 'Rounded', 1], ['soft', 'Extra round', 1.6]];
@@ -119,7 +119,7 @@ function layoutVars() {
   const fonts = { sans: 'var(--font)', serif: 'Charter, "Iowan Old Style", Georgia, "Noto Serif", serif', mono: 'var(--mono)' };
   return {
     '--content-w': pick(WIDTHS, prefs.width)[2] + 'px', '--ed-font': fonts[prefs.font] || fonts.sans, '--ed-lh': pick(SPACING, prefs.spacing)[2],
-    '--shape': pick(SHAPES, prefs.shape)[2], '--ed-size': prefs.size + 'px', '--row-h': prefs.density === 'compact' ? '40px' : '48px',
+    '--shape': pick(SHAPES, prefs.shape)[2], '--ed-size': prefs.size + 'px', '--row-h': prefs.density === 'compact' ? '30px' : '36px',
   };
 }
 

@@ -76,6 +76,7 @@ ok('still no markdown libraries after opening a txt', vendorRequests.length === 
 // markdown note (existing repos may have them)
 await page.click('.row.folder');
 await page.click('.row.file:has-text("todo")');
+await page.click('#modes button[title=Preview]');
 await page.waitForSelector('#preview h1');
 ok('md note previews (libs loaded on demand)', vendorRequests.length === 2);
 await page.waitForFunction(() => document.querySelector('#preview img')?.src?.startsWith('blob:'));
@@ -87,7 +88,7 @@ ok('checkbox toggles the source', (await page.inputValue('#ed')).includes('- [x]
 await page.screenshot({ path: `${SHOTS}/2-desktop-split.png` });
 
 // typing: list continuation
-await page.click('#ed'); await page.keyboard.press('Control+End');
+await page.click('#modes button[title=Edit]'); await page.click('#ed'); await page.keyboard.press('Control+End');
 await page.keyboard.type('\n- alpha'); await page.keyboard.press('Enter'); await page.keyboard.type('beta');
 ok('list continuation', (await page.inputValue('#ed')).endsWith('- alpha\n- beta'));
 
@@ -116,6 +117,7 @@ await page.waitForTimeout(250);
 ok('moved into Archive', (await page.locator('#crumb').innerText()).includes('Archive'));
 
 // attachment into a txt note inserts the relative path
+await page.focus('#ed');
 const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.click('#toolbar button[title^="Attach"]')]);
 await fc.setFiles({ name: 'doc.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 fake') });
 await page.waitForTimeout(300);
@@ -147,9 +149,6 @@ ok('favicon follows the palette', (await page.evaluate(() => decodeURIComponent(
 await page.screenshot({ path: `${SHOTS}/3-settings-rose.png` });
 await page.click('.chip:text-is("Black")');
 ok('black theme applies', await page.evaluate(() => getComputedStyle(document.body).backgroundColor) === 'rgb(0, 0, 0)');
-await page.click('.switch[data-part="stats"]');
-ok('word count can be hidden', await page.evaluate(() => getComputedStyle(document.querySelector('#stats')).display) === 'none');
-await page.click('.switch[data-part="stats"]');
 await page.click('dialog button:has-text("Close")');
 await page.reload(); await page.waitForSelector('.row');
 ok('appearance persisted across reload', await page.evaluate(() => document.documentElement.dataset.theme === 'black' && JSON.parse(localStorage.prefs).palette === 'rose'));

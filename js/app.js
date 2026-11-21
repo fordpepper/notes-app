@@ -9,14 +9,13 @@ import { icon } from './icons.js';
 import { promptText, confirmBox, pickFolder, showMenu, hideMenu } from './dialogs.js';
 import { prefs, applyPrefs } from './theme.js';
 import { openSettings } from './settings.js';
-import './ripple.js';
 
 const MAX_FILE = 25 * 1024 * 1024;   // keep uploads phone- and API-friendly
 
 /* ---------------------------------------------------------------- state */
 const S = {
   current: null, dir: '', q: '', kind: null, shownSha: null,
-  mode: ls.get('mode', 'split'), altMode: 'preview',     // view mode for markdown / for other previewable text (csv, json, code…)
+  mode: ls.get('mode', 'edit'), altMode: 'preview',     // view mode for markdown / for other previewable text (csv, json, code…)
   expanded: new Set(ls.get('expanded', [])),
   fresh: null,                       // path of a just-created, still-untouched note (discarded if left empty)
 };
@@ -381,7 +380,7 @@ function effMode() {
   const t = S.current && U.previewOf(S.current);
   if (!t) return 'edit';
   const m = t === 'md' ? S.mode : S.altMode;
-  return m === 'split' && !wide.matches ? (t === 'md' ? 'edit' : 'preview') : m;
+  return m === 'split' ? (t === 'md' ? 'edit' : 'preview') : m;      // the old side-by-side view is gone: one view at a time
 }
 function setMode(id) {
   if (U.previewOf(S.current) === 'md') { S.mode = id; ls.set('mode', id); } else S.altMode = id;
@@ -390,9 +389,9 @@ function setMode(id) {
 function applyMode() {
   const m = effMode();
   pane.dataset.mode = m;
-  const all = [['edit', 'pencil', 'Edit'], ...(wide.matches ? [['split', 'columns', 'Split']] : []), ['preview', 'eye', 'Preview']];
-  const modes = narrow.matches ? all.filter(x => x[0] !== m) : all;     // phones: one button that flips to the other view
-  $('#modes').classList.toggle('single', narrow.matches);
+  const all = [['edit', 'pencil', 'Edit'], ['preview', 'eye', 'Preview']];
+  const modes = all.filter(x => x[0] !== m);                            // one button that flips to the other view
+  $('#modes').classList.add('single');
   $('#modes').replaceChildren(...modes.map(([id, ic, label]) => h('button', { class: id === m ? 'on' : '', title: label, 'aria-label': label, 'aria-pressed': String(id === m), onclick: () => setMode(id) }, icon(ic), h('span', {}, label))));
   if (m !== 'edit') renderPreview();
   $('#toolbar').hidden = !(U.isNote(S.current || '') && m !== 'preview');
@@ -616,7 +615,7 @@ addEventListener('keydown', e => {
   const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
   if (e.key === 'Escape') { closeNav(); hideMenu(); if (document.body.classList.contains('focus')) toggleFocus(); }
   if (mod && k === 's') { e.preventDefault(); syncNow(); }
-  if (mod && k === 'e' && S.kind === 'text' && U.previewOf(S.current)) { e.preventDefault(); setMode(effMode() === 'edit' ? (wide.matches ? 'split' : 'preview') : 'edit'); }
+  if (mod && k === 'e' && S.kind === 'text' && U.previewOf(S.current)) { e.preventDefault(); setMode(effMode() === 'edit' ? 'preview' : 'edit'); }
   if (mod && k === 'f' && !e.shiftKey && document.activeElement !== ed) { e.preventDefault(); document.body.classList.remove('side-hidden', 'focus'); openNav(); $('#q').focus(); }
 });
 
@@ -656,7 +655,7 @@ async function boot() {
   const ic = (sel, ...nodes) => $(sel).append(...nodes);
   ic('#btnSync', icon('sync')); ic('#btnSync2', icon('sync')); ic('#btnSettings', icon('gear'));
   ic('#searchIcon', icon('search')); ic('#btnMenu', icon('menu'));
-  ic('#btnNote', icon('compose')); ic('#btnFolder', icon('folderPlus')); ic('#btnUpload', icon('upload'));
+  ic('#btnNote', icon('plus')); ic('#btnFolder', icon('folderPlus')); ic('#btnUpload', icon('upload'));
   ic('#btnPin', icon('starO')); ic('#btnMore', icon('more')); ic('#emptyNew', icon('plus'), 'New note');
   applyPrefs();
   bindPullToRefresh(treeEl, $('#ptr'), () => G.configured() ? G.sync({ force: true }) : openSettings(true, settingsCtx));

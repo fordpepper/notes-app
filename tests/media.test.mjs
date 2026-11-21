@@ -59,6 +59,7 @@ async function setup(opts) {
 const page = await setup({ viewport: { width: 1280, height: 800 } });
 await page.goto(URL0); await page.waitForSelector('.row.file');
 await page.click('.row .name:text-is("Trip")');
+await page.click('#modes button[title=Preview]');
 await page.waitForSelector('#preview h1');
 await page.waitForFunction(() => [...document.querySelectorAll('#preview img')].every(i => i.src.startsWith('blob:') && i.classList.contains('ready')), null, { timeout: 15000 });
 const info = await page.evaluate(async () => [...document.querySelectorAll('#preview img')].map(i => ({ w: i.naturalWidth, h: i.naturalHeight, src: i.src, path: i.dataset.path })));
@@ -94,6 +95,7 @@ ok('odd-extension picture opens in the viewer', true);
 // reload: thumbnail comes from the cache, the original is not re-read
 await page.reload(); await page.waitForSelector('.row.file');
 await page.click('.row .name:text-is("Trip")');
+await page.locator('#modes button[title=Preview]').click({ timeout: 1500 }).catch(() => {});
 await page.waitForFunction(() => [...document.querySelectorAll('#preview img')].every(i => i.classList.contains('ready')));
 ok('after reload the preview loads again', true);
 

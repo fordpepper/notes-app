@@ -11,7 +11,7 @@
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <script>try{var r=document.documentElement,P=JSON.parse(localStorage.getItem('prefs')||'{}'),T=JSON.parse(localStorage.getItem('tv')||'null'),th=P.theme||'auto';if(th!=='auto')r.dataset.theme=th;var m=th==='auto'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):th;if(T&&T[m]){T[m].split(';').forEach(function(x){var i=x.indexOf(':');r.style.setProperty(x.slice(0,i),x.slice(i+1))});r.style.colorScheme=m==='light'?'light':'dark'}(P.hide||[]).forEach(function(k){r.classList.add('hide-'+k)})}catch(e){}</script>
 <link rel="stylesheet" href="style.css">
-<link rel="modulepreload" href="js/app.js"><link rel="modulepreload" href="js/model.js"><link rel="modulepreload" href="js/sync.js"><link rel="modulepreload" href="js/util.js"><link rel="modulepreload" href="js/dom.js"><link rel="modulepreload" href="js/db.js"><link rel="modulepreload" href="js/icons.js"><link rel="modulepreload" href="js/dialogs.js"><link rel="modulepreload" href="js/theme.js"><link rel="modulepreload" href="js/settings.js"><link rel="modulepreload" href="js/preview.js"><link rel="modulepreload" href="js/media.js"><link rel="modulepreload" href="js/ripple.js"><link rel="modulepreload" href="js/editor-tools.js">
+<link rel="modulepreload" href="js/app.js"><link rel="modulepreload" href="js/model.js"><link rel="modulepreload" href="js/sync.js"><link rel="modulepreload" href="js/util.js"><link rel="modulepreload" href="js/dom.js"><link rel="modulepreload" href="js/db.js"><link rel="modulepreload" href="js/icons.js"><link rel="modulepreload" href="js/dialogs.js"><link rel="modulepreload" href="js/theme.js"><link rel="modulepreload" href="js/settings.js"><link rel="modulepreload" href="js/preview.js"><link rel="modulepreload" href="js/media.js"><link rel="modulepreload" href="js/editor-tools.js">
 </head>
 <body>
 <!-- Logo: colours follow the accent setting -->
@@ -31,20 +31,17 @@
 <div id="app">
   <aside id="side" aria-label="Notes list">
     <header class="side-head">
-      <h1>Notes</h1>
-      <div class="side-actions">
-        <button id="btnFolder" class="icon" title="New folder" aria-label="New folder"></button>
-        <button id="btnUpload" class="icon" title="Upload files" aria-label="Upload files"></button>
-        <button id="btnSettings" class="icon" title="Settings" aria-label="Settings"></button>
-      </div>
+      <div class="search"><span id="searchIcon"></span><input id="q" type="search" placeholder="Search" autocomplete="off" aria-label="Search notes"></div>
+      <button id="btnNote" class="icon" title="New note" aria-label="New note"></button>
     </header>
-    <div class="search"><span id="searchIcon"></span><input id="q" type="search" placeholder="Search notes" autocomplete="off" aria-label="Search notes"></div>
     <div id="ptr" aria-hidden="true"></div>
     <nav id="tree" aria-label="Notes"></nav>
-    <button id="btnNote" class="fab" title="New note" aria-label="New note"></button>
     <footer id="foot">
       <div id="status" role="button" tabindex="0" title="Sync now"><i class="dot"></i><span></span></div>
-      <button id="btnSync" class="icon" title="Sync now (Ctrl+S)" aria-label="Sync now"></button>
+      <button id="btnFolder" class="icon sm" title="New folder" aria-label="New folder"></button>
+      <button id="btnUpload" class="icon sm" title="Upload files" aria-label="Upload files"></button>
+      <button id="btnSync" class="icon sm" title="Sync now (Ctrl+S)" aria-label="Sync now"></button>
+      <button id="btnSettings" class="icon sm" title="Settings" aria-label="Settings"></button>
     </footer>
   </aside>
   <div id="scrim"></div>
@@ -75,10 +72,8 @@
     </div>
     <div id="empty">
       <div class="empty-card">
-        <svg class="logo big" width="72" height="72" aria-hidden="true"><use href="#logo"/></svg>
-        <h2>Your notes</h2>
-        <p id="emptyMsg">Pick a note from the list, or start a new one.</p>
-        <div class="row-btns"><button id="emptyNew" class="primary"></button><button id="emptyList" class="tonal">Browse notes</button><button id="emptyConnect" class="text">Connect GitHub</button></div>
+        <p id="emptyMsg">Pick a note, or start a new one.</p>
+        <div class="row-btns"><button id="emptyNew" class="text"></button><button id="emptyList" class="text">Browse notes</button><button id="emptyConnect" class="text">Connect GitHub</button></div>
       </div>
     </div>
   </main>
