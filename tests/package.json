@@ -2,6 +2,6 @@
   "name": "notes-tests",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node sync.test.mjs && node e2e.test.mjs && node media.test.mjs && node docs.test.mjs" },
+  "scripts": { "test": "node sync.test.mjs && node e2e.test.mjs && node media.test.mjs && node docs.test.mjs && node data.test.mjs" },
   "devDependencies": { "fake-indexeddb": "^6.0.0", "playwright": "^1.50.0" }
 }

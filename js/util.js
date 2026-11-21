@@ -14,7 +14,7 @@ const IMG = new Set('png jpg jpeg jfif gif webp svg avif bmp ico apng'.split(' '
 const AUD = new Set('mp3 wav ogg m4a flac opus aac weba'.split(' '));
 const VID = new Set('mp4 webm mov mkv ogv m4v 3gp'.split(' '));
 const FONT = new Set('ttf otf woff woff2'.split(' '));
-const OFFICE = new Set('docx xlsx pptx odt ods odp'.split(' '));
+const OFFICE = new Set('docx docm dotx dotm xlsx xlsm xltx xltm pptx pptm potx ppsx ppsm odt ods odp'.split(' '));
 const ARCHIVE = new Set('zip jar apk epub 7z rar tar gz tgz bz2 xz'.split(' '));
 export const ZIPPED = new Set(['zip', 'jar', 'apk', 'epub', ...OFFICE]);   // formats we can open ourselves (zip container)
 
@@ -125,8 +125,8 @@ export function previewOf(p) {
 export function iconOf(p, rec) {
   const k = kindOf(p, rec), e = extOf(p), pv = previewOf(p);
   if (k === 'text') return pv === 'md' || !pv ? (isNote(p) ? 'note' : 'file') : pv === 'table' ? 'table' : pv === 'json' ? 'json' : 'code';
-  if (k === 'office') return ['xlsx', 'ods'].includes(e) ? 'table' : ['pptx', 'odp'].includes(e) ? 'slides' : 'note';
+  if (k === 'office') return ['xlsx', 'xlsm', 'xltx', 'xltm', 'ods'].includes(e) ? 'table' : ['pptx', 'pptm', 'potx', 'ppsx', 'ppsm', 'odp'].includes(e) ? 'slides' : 'note';
   return { image: 'image', audio: 'audio', video: 'video', pdf: 'pdf', font: 'font', archive: 'archive' }[k] || 'file';
 }
-const LABELS = { docx: 'Word document', odt: 'Text document', xlsx: 'Excel spreadsheet', ods: 'Spreadsheet', pptx: 'PowerPoint presentation', odp: 'Presentation', zip: 'ZIP archive', epub: 'E-book', jar: 'Java archive', apk: 'Android package', '7z': '7-Zip archive', rar: 'RAR archive', tar: 'TAR archive', gz: 'GZip archive' };
+const LABELS = { docx: 'Word document', docm: 'Word document', dotx: 'Word template', xlsm: 'Excel spreadsheet', xltx: 'Excel template', pptm: 'PowerPoint presentation', potx: 'PowerPoint template', ppsx: 'PowerPoint slideshow', xls: 'Excel (old format, save as .xlsx to preview)', doc: 'Word (old format, save as .docx to preview)', ppt: 'PowerPoint (old format, save as .pptx to preview)', odt: 'Text document', xlsx: 'Excel spreadsheet', ods: 'Spreadsheet', pptx: 'PowerPoint presentation', odp: 'Presentation', zip: 'ZIP archive', epub: 'E-book', jar: 'Java archive', apk: 'Android package', '7z': '7-Zip archive', rar: 'RAR archive', tar: 'TAR archive', gz: 'GZip archive' };
 export const labelOf = p => LABELS[extOf(p)] || (extOf(p) ? extOf(p).toUpperCase() + ' file' : 'File');

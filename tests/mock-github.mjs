@@ -35,7 +35,7 @@ export function createMock({ owner = 'me', repo = 'notes' } = {}) {
         return json({ object: { sha: head } }, 200, { etag });
       }
       if ((r = p.match(/^\/git\/commits\/(\w+)$/)) && method === 'GET') return json({ tree: { sha: commits.get(r[1]).treeSha } });
-      if ((r = p.match(/^\/git\/trees\/(\w+)$/)) && method === 'GET') return json({ truncated: false, tree: [...trees.get(r[1])].map(([path, sha]) => ({ path, sha, type: 'blob', mode: '100644' })) });
+      if ((r = p.match(/^\/git\/trees\/(\w+)$/)) && method === 'GET') return json({ truncated: false, tree: [...trees.get(r[1])].map(([path, sha]) => ({ path, sha, type: 'blob', mode: '100644', size: blobs.get(sha)?.length })) });
       if (p === '/git/blobs' && method === 'POST') return json({ sha: addBlob(Buffer.from(body.content, 'base64')) });
       if ((r = p.match(/^\/git\/blobs\/(\w+)$/))) { const b = blobs.get(r[1]); return b ? { status: 200, raw: b, headers: {} } : json({ message: 'Not Found' }, 404); }
       if (p === '/git/trees' && method === 'POST') {

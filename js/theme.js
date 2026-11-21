@@ -28,7 +28,7 @@ export const PARTS = [
   ['status', 'Sync status text'], ['stats', 'Word count'], ['toolbar', 'Formatting bar'],
 ];
 
-const DEFAULTS = { theme: 'auto', palette: 'teal', seeds: ['#0e8f7e', '', ''], vibrance: 'normal', width: 'normal', font: 'sans', spacing: 'normal', shape: 'normal', density: 'comfortable', size: 17, poll: 120, hide: [] };
+const DEFAULTS = { theme: 'auto', palette: 'teal', seeds: ['#0e8f7e', '', ''], vibrance: 'normal', width: 'normal', font: 'sans', spacing: 'normal', shape: 'normal', density: 'comfortable', size: 17, poll: 120, files: 'smart', hide: [] };
 export const prefs = { ...DEFAULTS, ...ls.get('prefs', {}) };
 // migrations: v1 purple default, v2 single accent colour -> palettes, v3 text sizes
 if (!prefs.v) { if (prefs.accent === '#6d5ae6') prefs.accent = '#0e8f7e'; prefs.v = 2; }

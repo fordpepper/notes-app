@@ -7,7 +7,12 @@ import { db } from './db.js';
 import { enc, dec, join, gitBlobSha, mimeOf, isText, isNote, isHidden, isAmbiguous, kindOf, sniff, looksText } from './util.js';
 
 export const files = new Map();
-export const hooks = { fetchBlob: null };   // set by sync.js: sha -> ArrayBuffer
+export const hooks = { fetchBlob: null, gate: null };   // fetchBlob: set by sync.js (sha -> ArrayBuffer); gate: set by the app (true = ask before downloading)
+/** True on mobile data (or with Data Saver on): large downloads should wait for the user's OK. Unknown networks count as unmetered. */
+export const metered = () => { const c = navigator.connection; return !!c && (c.type === 'cellular' || c.saveData === true); };
+const approved = new Set();
+export const approve = p => approved.add(p);
+export const needsApproval = p => { const r = files.get(p); return !!(hooks.gate && r && !r.deleted && r.content == null && !approved.has(p) && hooks.gate()); };
 const subs = new Set();
 /** kind: 'tree' (structure/other changes) or 'content' (only a note's text changed) */
 export const subscribe = f => (subs.add(f), () => subs.delete(f));
@@ -17,6 +22,9 @@ export const PINS = '.notes-app.json';
 /** Files we always keep downloaded: notes (searchable, editable offline) and the pins file. */
 export const isEager = p => p === PINS || (isNote(p) && !isHidden(p));
 
+/** Size in bytes: from the content if it's on this device, else the size GitHub told us. */
+export const sizeOf = r => r.content == null ? (r.size ?? null) : typeof r.content === 'string' ? enc.encode(r.content).length : r.content.size;
+export const isLocal = r => r.content != null;
 export const isDirty = r => r.deleted ? !!r.synced : r.sha !== r.synced;
 export const pendingCount = () => { let n = 0; for (const r of files.values()) if (isDirty(r)) n++; return n; };
 export const exists = p => { const r = files.get(p); return !!r && !r.deleted; };
@@ -86,6 +94,7 @@ export async function ensureContent(path) {
   const r = files.get(path);
   if (!r || r.deleted) throw new Error('File not found');
   if (r.content != null) return r;
+  if (needsApproval(path)) throw Object.assign(new Error('Not downloaded yet. Waiting for your OK to use mobile data.'), { needsApproval: true });
   if (!hooks.fetchBlob) throw new Error('Not connected to GitHub');
   const buf = await hooks.fetchBlob(r.sha);
   const content = isText(path) && !isAmbiguous(path) ? dec.decode(buf) : new Blob([buf], { type: mimeOf(path) });

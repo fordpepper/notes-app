@@ -2,6 +2,8 @@
 import * as M from './model.js';
 import * as U from './util.js';
 import { blobUrl, peek, display } from './media.js';
+import { h, fmtSize } from './dom.js';
+import { icon } from './icons.js';
 
 let libs;
 const loadLibs = () => libs ??= Promise.all([import('../vendor/marked.js'), import('../vendor/purify.js')])
@@ -26,7 +28,12 @@ export function findNote(name) {
 const io = 'IntersectionObserver' in window ? new IntersectionObserver(es => {
   for (const e of es) if (e.isIntersecting) { io.unobserve(e.target); load(e.target, e.target.dataset.path); }
 }, { rootMargin: '600px 0px' }) : null;
-const load = (el, p) => display(p).then(u => { if (el.isConnected || !el.src) el.src = u; }).catch(() => { el.alt = 'Could not load ' + p; el.classList.add('ready'); });
+/** On mobile data a picture that isn't on the device yet waits behind a tap. */
+function askPicture(el, p) {
+  const r = M.files.get(p);
+  el.replaceWith(h('button', { class: 'imgask', onclick: () => { M.approve(p); document.dispatchEvent(new Event('preview-refresh')); } }, icon('cloud'), `Load picture${r?.size ? ` (${fmtSize(r.size)})` : ''}`));
+}
+const load = (el, p) => display(p).then(u => { if (el.isConnected || !el.src) el.src = u; }).catch(err => { if (err.needsApproval) return askPicture(el, p); el.alt = 'Could not load ' + p; el.classList.add('ready'); });
 const watch = (el, p) => io ? io.observe(el) : load(el, p);
 
 let seq = 0;

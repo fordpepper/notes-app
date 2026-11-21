@@ -9,6 +9,7 @@ import { icon } from './icons.js';
 import { promptText, confirmBox, pickFolder, showMenu, hideMenu } from './dialogs.js';
 import { prefs, applyPrefs } from './theme.js';
 import { openSettings } from './settings.js';
+import { openAllFiles } from './alltree.js';
 
 const MAX_FILE = 25 * 1024 * 1024;   // keep uploads phone- and API-friendly
 
@@ -316,6 +317,10 @@ async function duplicate(path) {
   openFile(to);
 }
 async function downloadFile(path) {
+  if (M.needsApproval(path)) {
+    if (!await confirmBox({ title: 'Use mobile data?', body: `“${U.basename(path)}” (${fmtSize(M.sizeOf(M.files.get(path)) ?? 0)}) isn’t on this device yet.`, ok: 'Download' })) return;
+    M.approve(path);
+  }
   try {
     const blob = await M.getBlob(path);
     const a = h('a', { href: URL.createObjectURL(blob), download: U.basename(path) });
@@ -330,12 +335,24 @@ async function togglePin(path) {
 }
 
 /* ---------------------------------------------------------------- main view */
+/** Not downloaded and on mobile data: show what it is and let the user decide. */
+function renderNeedDownload(path) {
+  const r = M.files.get(path), size = M.sizeOf(r);
+  pane.dataset.mode = 'view'; $('#main').classList.add('has-file');
+  $('#viewer').replaceChildren(h('div', { class: 'filecard' }, h('div', { class: 'badge' }, icon('cloud')), h('b', {}, U.basename(path)),
+    h('span', {}, `${U.labelOf(path)}${size != null ? ' · ' + fmtSize(size) : ''} · not on this device yet`), h('span', {}, 'You’re on mobile data, so it wasn’t downloaded.'),
+    h('div', { class: 'viewer-actions' }, h('button', { class: 'primary', onclick: () => { M.approve(path); showFile(path); } }, icon('download'), size != null ? `Download (${fmtSize(size)})` : 'Download'))));
+  S.kind = 'other'; S.shownSha = r.sha;
+  syncHeader(); buildToolbar(); updateStats();
+}
 async function showFile(path) {
-  const r = M.files.get(path);
+  let r = M.files.get(path);
+  if (M.needsApproval(path)) return renderNeedDownload(path);
   let k = U.kindOf(path, r);
   if (U.isAmbiguous(path) && !r.kind) {                              // no trustworthy extension: look at the content
     try { k = await M.resolveKind(path); } catch { /* offline and not downloaded: fall back to the extension */ }
     if (S.current !== path) return;
+    r = M.files.get(path);                                           // sniffing may have replaced the record (e.g. Blob -> text)
   }
   S.kind = k; S.shownSha = r.sha;
   $('#main').classList.add('has-file');
@@ -415,7 +432,7 @@ async function renderViewer(path, k) {
       v.replaceChildren(box, acts);
       if (k === 'pdf') acts.append(h('a', { class: 'ghost', href: URL.createObjectURL(blob), target: '_blank', rel: 'noopener' }, icon('open'), 'Open in new tab'));
       try { await (await import('./docs.js')).renderBinary(box, k, path, blob); }
-      catch (e) { console.warn(e); v.replaceChildren(fileCard(path, M.files.get(path)), acts); }
+      catch (e) { console.warn(e); v.replaceChildren(fileCard(path, M.files.get(path)), h('p', { class: 'dim' }, 'Couldn’t draw a preview: ' + (e.message || e)), acts); }
       return;
     }
     if (k === 'other' || k === 'text') { await M.ensureContent(path); if (S.current !== path) return; v.replaceChildren(fileCard(path, M.files.get(path)), acts); return; }
@@ -554,6 +571,7 @@ function renderStatus() {
   let s = 'idle', text;
   if (!on) { s = 'off'; text = n ? 'Local only. Tap to connect GitHub' : 'Not connected. Tap to connect GitHub'; }
   else if (st.state === 'syncing') { s = 'syncing'; text = st.msg || 'Syncing…'; }
+  else if (prefetch.running && st.state !== 'error') { s = 'syncing'; text = `Downloading files ${prefetch.done}/${prefetch.total}`; }
   else if (st.state === 'error') { s = 'error'; text = st.msg; }
   else if (st.state === 'offline') { s = 'pending'; text = `Offline${n ? ` · ${n} change${n > 1 ? 's' : ''} waiting` : ''}`; }
   else if (n) { s = 'pending'; text = `${n} change${n > 1 ? 's' : ''} to sync`; }
@@ -561,7 +579,7 @@ function renderStatus() {
   document.body.dataset.sync = s; el.dataset.s = s; el.title = text; el.lastChild.textContent = text;
   for (const b of [$('#btnSync'), $('#btnSync2')]) { b.classList.toggle('spin', st.state === 'syncing'); b.classList.toggle('pending', on && n > 0 && st.state !== 'syncing'); }
 }
-G.onStatus(() => { renderStatus(); if (G.status.state !== 'syncing') renderTree(); });
+G.onStatus(() => { renderStatus(); if (G.status.state !== 'syncing') { renderTree(); if (G.status.state === 'idle') schedulePrefetch(); } });
 setInterval(renderStatus, 30000);
 addEventListener('online', () => G.sync());
 addEventListener('focus', resumeSync);
@@ -570,6 +588,28 @@ document.addEventListener('visibilitychange', () => {
   else { resumeSync(); renderStatus(); }
 });
 addEventListener('pagehide', flush);
+
+/* ---- files that aren't downloaded yet: fetch them on Wi-Fi, ask on mobile data ---- */
+let prefetch = { running: false, done: 0, total: 0 }, prefetchT;
+const stopPrefetch = () => !navigator.onLine || (prefs.files === 'smart' && M.metered());
+async function prefetchFiles() {
+  if (prefetch.running || !G.configured() || prefs.files === 'manual' || stopPrefetch() || G.status.state === 'syncing') return;
+  const todo = [...M.files.values()].filter(r => !r.deleted && r.content == null && (r.size ?? 0) <= 100 * 1024 * 1024).sort((x, y) => (x.size ?? 0) - (y.size ?? 0));
+  if (!todo.length) return;
+  prefetch = { running: true, done: 0, total: todo.length };
+  renderStatus();
+  try {
+    await U.pool(todo, 2, async r => {
+      if (stopPrefetch()) return;
+      try { await M.ensureContent(r.path); } catch { /* skipped; retried next time */ }
+      prefetch.done++; renderStatus();
+    });
+  } finally { prefetch.running = false; renderStatus(); }
+}
+const schedulePrefetch = (ms = 1500) => { clearTimeout(prefetchT); prefetchT = setTimeout(prefetchFiles, ms); };
+navigator.connection?.addEventListener?.('change', () => { schedulePrefetch(500); if (S.current && S.kind === 'other' && !M.needsApproval(S.current)) showFile(S.current); });
+addEventListener('online', () => schedulePrefetch());
+document.addEventListener('preview-refresh', () => renderPreview());
 
 /* model changes (local edits, sync downloads) */
 let raf, needTree = false;
@@ -599,6 +639,7 @@ const settingsCtx = {
   onWiped: () => { closeFile(); renderTree(); renderStatus(); },
   onConnected: () => { renderStatus(); schedulePoll(); $('#emptyConnect').hidden = true; },
   onPollChanged: schedulePoll,
+  onFilesChanged: () => schedulePrefetch(300),
 };
 function toggleFocus() {
   const on = document.body.classList.toggle('focus');
@@ -656,9 +697,10 @@ async function boot() {
   const ic = (sel, ...nodes) => $(sel).append(...nodes);
   ic('#btnSync', icon('sync')); ic('#btnSync2', icon('sync')); ic('#btnSettings', icon('gear'));
   ic('#searchIcon', icon('search')); ic('#btnMenu', icon('menu'));
-  ic('#btnNote', icon('plus')); ic('#btnFolder', icon('folderPlus')); ic('#btnUpload', icon('upload'));
+  ic('#btnNote', icon('plus')); ic('#btnTree', icon('tree')); ic('#btnFolder', icon('folderPlus')); ic('#btnUpload', icon('upload'));
   ic('#btnPin', icon('starO')); ic('#btnMore', icon('more')); ic('#emptyNew', icon('plus'), 'New note');
   applyPrefs();
+  M.hooks.gate = () => prefs.files === 'smart' && M.metered();
   bindPullToRefresh(treeEl, $('#ptr'), () => G.configured() ? G.sync({ force: true }) : openSettings(true, settingsCtx));
 
   $('#btnSync').onclick = $('#btnSync2').onclick = $('#status').onclick = syncNow;
@@ -667,6 +709,7 @@ async function boot() {
   $('#emptyConnect').onclick = () => openSettings(true, settingsCtx);
   $('#emptyList').onclick = openNav;
   $('#btnNote').onclick = $('#emptyNew').onclick = () => newNote();
+  $('#btnTree').onclick = () => openAllFiles(openFile, S.current);
   $('#btnFolder').onclick = () => newFolder();
   $('#btnUpload').onclick = () => pickUpload();
   $('#btnPin').onclick = () => S.current && togglePin(S.current);

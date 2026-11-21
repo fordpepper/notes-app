@@ -9,6 +9,7 @@ import { prefs, savePrefs, applyPrefs, PALETTES, FONTS, swatch } from './theme.j
 const DOTS = ['teal', 'blue', 'indigo', 'violet', 'rose', 'orange', 'green', 'graphite'];
 
 const SIZES = [[15, 'Small'], [17, 'Medium'], [19, 'Large'], [21, 'Extra large']];
+const FILES = [['smart', 'Smart'], ['manual', 'Only when opened'], ['always', 'Always']];
 const POLLS = [[60, 'Every minute'], [120, 'Every 2 min'], [300, 'Every 5 min'], [0, 'Manual']];
 const THEMES = [['auto', 'Match system'], ['light', 'Light'], ['dark', 'Dark'], ['black', 'Black']];
 
@@ -96,6 +97,8 @@ export function openSettings(first, ctx) {
           h('summary', {}, 'More'),
           h('div', { class: 'group' },
             labelled('Font', chips(FONTS, () => prefs.font, v => set('font', v))),
+            labelled('Files', chips(FILES, () => prefs.files, v => { set('files', v); ctx.onFilesChanged?.(); })),
+            h('p', {}, 'Notes are always kept on the device. Smart: other files download by themselves on Wi-Fi and ask first on mobile data.'),
             labelled('Check for updates', chips(POLLS, () => prefs.poll, v => { set('poll', +v); ctx.onPollChanged?.(); })),
             old && h('button', { type: 'button', class: 'ghost', onclick: () => { G.resetState(); close(true); toast('Checking everything against GitHub…'); G.sync({ force: true }); } }, 'Full resync'))),
         err),

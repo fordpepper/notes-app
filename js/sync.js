@@ -116,9 +116,9 @@ async function doSync(force) {
       treeSha = commit.tree.sha;
       const tree = await gh(cfg, `${rp}/git/trees/${treeSha}?recursive=1`);
       if (tree.truncated) console.warn('Repo tree is truncated by GitHub; very large repos are not fully supported.');
-      remote = new Map();
-      for (const t of tree.tree) if (t.type === 'blob' && t.path.startsWith(root) && /^100(644|755)$/.test(t.mode)) remote.set(t.path.slice(root.length), t.sha);
-      const downloads = await reconcile(remote);
+      remote = new Map(); const sizes = new Map();
+      for (const t of tree.tree) if (t.type === 'blob' && t.path.startsWith(root) && /^100(644|755)$/.test(t.mode)) { remote.set(t.path.slice(root.length), t.sha); sizes.set(t.path.slice(root.length), t.size); }
+      const downloads = await reconcile(remote, sizes);
       let done = 0;
       await pool(downloads, 8, async d => {
         await download(d);
@@ -142,14 +142,14 @@ async function doSync(force) {
 const conflictName = p => join(dirname(p), `${stem(p)} (conflict ${new Date().toISOString().slice(0, 10)})${extOf(p) ? '.' + extOf(p) : ''}`);
 
 /** Compare the remote listing with local records. Applies the trivial outcomes and returns what to download. */
-async function reconcile(remote) {
+async function reconcile(remote, sizes) {
   const downloads = [], writes = [];
   for (const p of new Set([...remote.keys(), ...M.files.keys()])) {
     const R = remote.get(p), L = M.files.get(p);
-    if (!L) { downloads.push({ path: p, sha: R, base: null }); continue; }
+    if (!L) { downloads.push({ path: p, sha: R, base: null, size: sizes.get(p) }); continue; }
     if (L.deleted) {
       if (R === undefined) writes.push(M.drop(p));                                // gone on both sides
-      else if (R !== L.synced) downloads.push({ path: p, sha: R, base: null });   // changed remotely: restore it
+      else if (R !== L.synced) downloads.push({ path: p, sha: R, base: null, size: sizes.get(p) });   // changed remotely: restore it
       continue;                                                                    // else: push the delete
     }
     if (R === undefined) {
@@ -158,27 +158,27 @@ async function reconcile(remote) {
       }
       continue;                                                                    // never pushed: will push
     }
-    if (L.sha === R) { if (L.synced !== R) writes.push(M.put({ ...L, synced: R })); continue; }
+    if (L.sha === R) { if (L.synced !== R || (L.size == null && sizes.has(p))) writes.push(M.put({ ...L, synced: R, size: L.size ?? sizes.get(p) })); continue; }
     if (L.synced === R) continue;                                                  // only local changed: push
-    if (L.sha === L.synced) { downloads.push({ path: p, sha: R, base: L.sha }); continue; }   // only remote changed
+    if (L.sha === L.synced) { downloads.push({ path: p, sha: R, base: L.sha, size: sizes.get(p) }); continue; }   // only remote changed
     // Both changed: remote wins at the original path, the local version is kept as a conflict copy.
     if (p !== M.PINS) {
       const copy = uniquePath(conflictName(p), q => M.exists(q) || remote.has(q));
       writes.push(M.put({ ...L, path: copy, synced: null }));
     }
-    downloads.push({ path: p, sha: R, base: L.sha });
+    downloads.push({ path: p, sha: R, base: L.sha, size: sizes.get(p) });
   }
   await Promise.all(writes);
   return downloads;
 }
 
-async function download({ path, sha, base }) {
+async function download({ path, sha, base, size }) {
   let content = null;                                    // null = fetched on demand
   if (sha === EMPTY_SHA) content = M.isEager(path) ? '' : new Blob([]);
   else if (M.isEager(path)) content = dec.decode(await M.hooks.fetchBlob(sha));
   const cur = M.files.get(path);
   if (cur && !cur.deleted && cur.sha !== base) return;   // edited while downloading: next sync sorts it out
-  await M.put({ path, content, sha, synced: sha, mtime: Date.now() });
+  await M.put({ path, content, sha, synced: sha, size, mtime: Date.now() });
 }
 
 function commitMessage(dirty) {

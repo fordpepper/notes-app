@@ -152,30 +152,26 @@ export async function readZip(blob) {
   return { entries, has: n => byName.has(n), bytes: n => bytes(byName.get(n)), text: async n => new TextDecoder().decode(await bytes(byName.get(n))), xml: async n => new DOMParser().parseFromString(await (async () => new TextDecoder().decode(await bytes(byName.get(n))))(), 'application/xml') };
 }
 const tags = (n, name) => [...n.getElementsByTagName(name)];
-const textOf = (n, name) => tags(n, name).map(x => x.textContent).join('');
-
-/* ------------------------------------------------------------------ OpenDocument text */
-async function renderOdt(box, z) {
-  const doc = await z.xml('content.xml'), out = [];
-  const walk = n => { for (const c of n.children) {
-    if (c.nodeName === 'text:h') out.push(h('h' + Math.min(4, +c.getAttribute('text:outline-level') || 1), {}, c.textContent));
-    else if (c.nodeName === 'text:p') out.push(h('p', {}, c.textContent));
-    else walk(c);
-  } };
-  walk(doc.getElementsByTagName('office:text')[0] || doc.documentElement);
-  box.replaceChildren(h('article', { class: 'md docpage' }, out.length ? out : h('p', {}, 'This document is empty.')));
+/** Parse an xlsx part. Tolerates producers that prefix every element (<x:row>) and huge sheets (keeps the first `maxRows` rows). */
+async function looseXml(z, name, maxRows) {
+  let t = await z.text(name), truncated = false;
+  const m = /^(?:<\?xml[^>]*\?>\s*)?<(\w+):\w+[\s>]/.exec(t);
+  if (m) t = t.replace(new RegExp('<(/?)' + m[1] + ':', 'g'), '<$1');
+  if (maxRows) {
+    const a = t.indexOf('<sheetData'), b = t.lastIndexOf('</sheetData>');
+    if (a > 0 && b > a) {
+      let pos = a, n = 0;
+      while (n <= maxRows && (pos = t.indexOf('<row', pos + 1)) > 0 && pos < b) n++;
+      if (n > maxRows && pos > 0 && pos < b) { t = t.slice(0, pos) + t.slice(b); truncated = true; }
+    }
+  }
+  return { doc: new DOMParser().parseFromString(t, 'application/xml'), truncated };
 }
+const textOf = (n, name) => tags(n, name).map(x => x.textContent).join('');
 
 /* ------------------------------------------------------------------ Excel / OpenDocument spreadsheet */
 const colIndex = ref => { let n = 0; for (const ch of /^[A-Z]+/i.exec(ref)[0].toUpperCase()) n = n * 26 + ch.charCodeAt(0) - 64; return n - 1; };
 const colName = i => { let s = ''; for (i++; i > 0; i = (i - 1) / 26 | 0) s = String.fromCharCode(65 + (i - 1) % 26) + s; return s; };
-async function renderOds(box, z) {
-  const doc = await z.xml('content.xml'), tbls = tags(doc, 'table:table');
-  const grid = t => tags(t, 'table:table-row').slice(0, 5000).flatMap(r => { const row = []; for (const c of [...r.children].filter(c => c.nodeName === 'table:table-cell' || c.nodeName === 'table:covered-table-cell')) { const rep = Math.min(+c.getAttribute('table:number-columns-repeated') || 1, 50); for (let i = 0; i < rep; i++) row.push(c.textContent); } while (row.length && row[row.length - 1] === '') row.pop(); return [row]; });
-  const rows = grid(tbls[0] || doc.documentElement);
-  box.replaceChildren(tableOf(rows, { header: false }));
-}
-
 /* ------------------------------------------------------------------ archives */
 async function renderArchive(box, z) {
   const rows = z.entries.slice(0, 2000).map(e => [e.name, e.name.endsWith('/') ? '' : fmtSize(e.size)]);
@@ -210,11 +206,13 @@ export async function renderBinary(box, kind, path, blob) {
   if (!U.ZIPPED.has(ext)) throw new Error('No preview for this format');
   const z = await readZip(blob);
   if (kind === 'archive') return renderArchive(box, z);
-  if (ext === 'docx') return renderDocx(box, blob);
-  if (ext === 'xlsx') return renderXlsx(box, z);
-  if (ext === 'pptx') return renderPptx(box, blob, z);
-  if (ext === 'odt') return renderOdt(box, z);
-  if (ext === 'ods') return renderOds(box, z);
+  const fam = { docm: 'docx', dotx: 'docx', dotm: 'docx', xlsm: 'xlsx', xltx: 'xlsx', xltm: 'xlsx', pptm: 'pptx', potx: 'pptx', ppsx: 'pptx', ppsm: 'pptx' }[ext] || ext;
+  if (fam === 'docx') return renderDocx(box, blob);
+  if (fam === 'xlsx') return renderXlsx(box, z);
+  if (fam === 'pptx') return (await import('./pptx.js')).renderPptx(box, z);
+  if (ext === 'odt') return (await import('./odf.js')).renderOdt(box, z);
+  if (ext === 'ods') return (await import('./odf.js')).renderOds(box, z);
+  if (ext === 'odp') return (await import('./odf.js')).renderOdp(box, z);
   return renderArchive(box, z);        // odp etc.: show what's inside
 }
 
@@ -230,26 +228,31 @@ async function loadPdfjs() {
 /** Pages are drawn exactly as in the file, fitted to the available width, and only when they scroll into view. */
 export async function renderPdf(box, blob) {
   const P = await loadPdfjs();
-  const doc = await P.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) }).promise;
+  const base = new URL('../vendor/pdfjs/', import.meta.url).href;       // fonts, colour profiles and image decoders, fetched only when a file needs them
+  const doc = await P.getDocument({ data: new Uint8Array(await blob.arrayBuffer()), standardFontDataUrl: base + 'standard_fonts/', cMapUrl: base + 'cmaps/', cMapPacked: true, wasmUrl: base + 'wasm/', iccUrl: base + 'iccs/', isEvalSupported: false }).promise;
   const wrap = h('div', { class: 'pdfdoc' });
   box.replaceChildren(h('div', { class: 'tablemeta' }, `${doc.numPages} page${doc.numPages === 1 ? '' : 's'}`), wrap);
-  const first = (await doc.getPage(1)).getViewport({ scale: 1 }), holders = [];
+  const sizes = await Promise.all(Array.from({ length: Math.min(doc.numPages, 80) }, (_, i) => doc.getPage(i + 1).then(pg => pg.getViewport({ scale: 1 }))));   // real page sizes up front: no layout jumps
+  const first = sizes[0], holders = [];
   const cssWidth = () => Math.max(200, Math.min(wrap.clientWidth || 800, 1000));
   const draw = async el => {
     const n = +el.dataset.n, page = await doc.getPage(n), vp1 = page.getViewport({ scale: 1 }), k = cssWidth() / vp1.width;
-    const vp = page.getViewport({ scale: k }), dpr = Math.min(devicePixelRatio || 1, 2.5), hi = page.getViewport({ scale: k * dpr });
+    const vp = page.getViewport({ scale: k });
+    let dpr = Math.min(devicePixelRatio || 1, 2.5);                  // keep huge or very tall pages inside what browsers can draw
+    dpr = Math.min(dpr, Math.sqrt(12e6 / (vp.width * vp.height)), 8000 / Math.max(vp.width, vp.height));
+    const hi = page.getViewport({ scale: k * dpr });
     if (!el.isConnected) return;
     el.style.width = vp.width + 'px'; el.style.height = vp.height + 'px';
     const cv = h('canvas', { width: Math.floor(hi.width), height: Math.floor(hi.height) });
     el.replaceChildren(cv);
     await page.render({ canvasContext: cv.getContext('2d'), canvas: cv, viewport: hi }).promise;
-    const tl = h('div', { class: 'textLayer' }); tl.style.setProperty('--scale-factor', vp.scale); el.append(tl);
+    const tl = h('div', { class: 'textLayer' }); tl.style.setProperty('--scale-factor', vp.scale); tl.style.setProperty('--total-scale-factor', vp.scale); el.append(tl);
     new P.TextLayer({ textContentSource: page.streamTextContent(), container: tl, viewport: vp }).render().catch(() => {});
   };
   const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { io.unobserve(e.target); draw(e.target).catch(console.warn); } }), { rootMargin: '900px 0px' });
   const layout = () => {
     const w = cssWidth();
-    holders.forEach(el => { io.unobserve(el); el.replaceChildren(); el.style.width = w + 'px'; el.style.height = Math.round(w * first.height / first.width) + 'px'; io.observe(el); });
+    holders.forEach((el, i) => { const s = sizes[i] || first; io.unobserve(el); el.replaceChildren(); el.style.width = w + 'px'; el.style.height = Math.round(w * s.height / s.width) + 'px'; io.observe(el); });
   };
   for (let n = 1; n <= doc.numPages; n++) { const el = h('div', { class: 'pdfpage', 'data-n': n }); holders.push(el); wrap.append(el); }
   layout();
@@ -277,29 +280,41 @@ async function renderDocx(box, blob) {
   for (const st of holder.querySelectorAll('style')) st.textContent = st.textContent
     .replace(/content:\s*"([\uE000-\uF8FF])/g, (_, c) => `content:"${BUL[c.charCodeAt(0)] || '•'}`)
     .replace(/font-family:\s*"?(Symbol|Wingdings[^;"]*|Webdings)"?\s*;/gi, 'font-family:inherit;');
+  await centerTables(holder, blob);
   fit(holder, '.docx-wrapper > section.docx');
 }
-
-/* ------------------------------------------------------------------ PowerPoint (pptx-preview: slides as designed) */
-async function renderPptx(box, blob, z) {
-  const { init } = await import('../vendor/pptx-preview.js');
-  let ratio = 9 / 16;
-  try { const s = (await z.xml('ppt/presentation.xml')).getElementsByTagName('p:sldSz')[0]; ratio = +s.getAttribute('cy') / +s.getAttribute('cx'); } catch { /* keep 16:9 */ }
-  const holder = h('div', { class: 'pptxview' });
-  box.replaceChildren(holder);
-  const width = Math.max(260, Math.min(holder.clientWidth || 900, 1100));
-  const viewer = init(holder, { width, height: Math.round(width * ratio), mode: 'list' });
-  await viewer.preview(await blob.arrayBuffer());
+/** Word centres (or right-aligns) tables relative to the text area, even when they are wider than it; the library always floats them left. */
+async function centerTables(holder, blob) {
+  try {
+    const doc = await (await readZip(blob)).xml('word/document.xml');
+    const defs = [...doc.getElementsByTagName('w:tbl')].map(t => {
+      const pr = [...t.children].find(c => c.nodeName === 'w:tblPr'), q = pr && [...pr.children].find(c => c.nodeName === 'w:tblpPr');
+      const jc = pr && [...pr.children].find(c => c.nodeName === 'w:jc')?.getAttribute('w:val');
+      return { how: q?.getAttribute('w:tblpXSpec') || jc, anchor: q?.getAttribute('w:horzAnchor') || 'margin' };     // floating tables carry their position in tblpPr
+    });
+    const tables = [...holder.querySelectorAll('section.docx table')];
+    if (tables.length !== defs.length) return;
+    tables.forEach((t, i) => {
+      const { how, anchor } = defs[i];
+      if (!['center', 'right', 'end'].includes(how)) return;
+      const sec = t.closest('section'), onPage = anchor === 'page' && sec;
+      const avail = onPage ? sec.clientWidth : t.parentElement.clientWidth, w = t.offsetWidth;
+      if (!avail || !w) return;
+      const pad = onPage ? parseFloat(getComputedStyle(sec).paddingLeft) || 0 : 0;
+      t.style.float = 'none'; t.style.marginLeft = ((how === 'center' ? (avail - w) / 2 : avail - w) - pad) + 'px';
+    });
+  } catch (e) { console.warn(e); }
 }
 
 /* ------------------------------------------------------------------ Excel (cell styles, widths, merges, number formats) */
 const BUILTIN_FMT = { 1: '0', 2: '0.00', 3: '#,##0', 4: '#,##0.00', 9: '0%', 10: '0.00%', 14: 'yyyy-mm-dd', 15: 'd-mmm-yy', 16: 'd-mmm', 17: 'mmm-yy', 22: 'yyyy-mm-dd hh:mm', 45: 'mm:ss', 46: '[h]:mm:ss', 47: 'mm:ss.0' };
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-function formatCell(v, code) {
+function formatCell(v, code, date1904) {
   if (v === '' || v == null) return '';
   if (!code || /^general$/i.test(code)) { const n = +v; return v !== '' && !isNaN(n) && /^-?[\d.]+(e[+-]?\d+)?$/i.test(v) ? String(+n.toPrecision(12)) : v; }
-  const n = +v;
+  let n = +v;
   if (isNaN(n)) return v;
+  if (date1904) n += 1462;
   const clean = code.split(';')[n < 0 && code.includes(';') ? 1 : 0].replace(/"([^"]*)"/g, '$1').replace(/\[\$([^\]-]*)[^\]]*\]/g, '$1').replace(/\[[^\]]*\]/g, m => /^\[(h+|m+|s+)\]$/i.test(m) ? m : '').replace(/_.|\\./g, '').replace(/\*./g, '');
   if (/[dmyhs]/i.test(clean.replace(/[#0.,%]/g, '')) && /y|d|h|s|m/i.test(clean) && !/^[#0,.%$€£\s-]+$/.test(clean)) {   // date / time
     const dt = new Date(Math.round((n - 25569) * 86400000)), p = x => String(x).padStart(2, '0');
@@ -332,6 +347,7 @@ function tint(hex, t) {
 }
 async function renderXlsx(box, z) {
   const theme = themeColors(z.has('xl/theme/theme1.xml') ? await z.xml('xl/theme/theme1.xml') : null);
+  const lx = async n => (await looseXml(z, n)).doc;
   const color = e => {
     if (!e) return null;
     if (e.getAttribute('rgb')) return '#' + e.getAttribute('rgb').slice(-6);
@@ -341,24 +357,24 @@ async function renderXlsx(box, z) {
   };
   const st = { fonts: [], fills: [], borders: [], xfs: [], fmts: new Map() };
   if (z.has('xl/styles.xml')) {
-    const s = await z.xml('xl/styles.xml');
+    const s = await lx('xl/styles.xml');
     for (const n of tags(s, 'numFmt')) st.fmts.set(+n.getAttribute('numFmtId'), n.getAttribute('formatCode'));
     const kids = (tag, child) => tags(s, tag)[0] ? [...tags(s, tag)[0].children].filter(c => c.nodeName === child) : [];
     st.fonts = kids('fonts', 'font').map(f => ({ b: !!f.getElementsByTagName('b')[0], i: !!f.getElementsByTagName('i')[0], u: !!f.getElementsByTagName('u')[0], sz: +f.getElementsByTagName('sz')[0]?.getAttribute('val') || 11, name: f.getElementsByTagName('name')[0]?.getAttribute('val'), color: color(f.getElementsByTagName('color')[0]) }));
     st.fills = kids('fills', 'fill').map(f => { const p = f.getElementsByTagName('patternFill')[0]; return p && p.getAttribute('patternType') === 'solid' ? color(p.getElementsByTagName('fgColor')[0]) : null; });
     st.borders = kids('borders', 'border').map(b => Object.fromEntries(['left', 'right', 'top', 'bottom'].map(side => { const e = b.getElementsByTagName(side)[0], sty = e?.getAttribute('style'); return [side, sty ? { sty, color: color(e.getElementsByTagName('color')[0]) || '#000000' } : null]; })));
-    st.xfs = [...(tags(s, 'cellXfs')[0]?.children || [])].map(x => { const al = x.getElementsByTagName('alignment')[0]; return { fmt: +x.getAttribute('numFmtId') || 0, font: +x.getAttribute('fontId') || 0, fill: +x.getAttribute('fillId') || 0, border: +x.getAttribute('borderId') || 0, h: al?.getAttribute('horizontal'), v: al?.getAttribute('vertical'), wrap: al?.getAttribute('wrapText') === '1', indent: +al?.getAttribute('indent') || 0 }; });
+    st.xfs = [...(tags(s, 'cellXfs')[0]?.children || [])].map(x => { const al = x.getElementsByTagName('alignment')[0]; return { fmt: +x.getAttribute('numFmtId') || 0, font: +x.getAttribute('fontId') || 0, fill: +x.getAttribute('fillId') || 0, border: +x.getAttribute('borderId') || 0, h: al?.getAttribute('horizontal'), v: al?.getAttribute('vertical'), wrap: al?.getAttribute('wrapText') === '1', indent: +al?.getAttribute('indent') || 0, rot: +al?.getAttribute('textRotation') || 0 }; });
   }
   const base = st.fonts[0] || { sz: 11, name: 'Calibri' };
-  const shared = z.has('xl/sharedStrings.xml') ? tags(await z.xml('xl/sharedStrings.xml'), 'si').map(si => [...si.getElementsByTagName('t')].filter(t => t.parentNode.nodeName !== 'rPh').map(t => t.textContent).join('')) : [];
-  const wb = await z.xml('xl/workbook.xml'), rels = new Map();
-  for (const r of tags(await z.xml('xl/_rels/workbook.xml.rels'), 'Relationship')) rels.set(r.getAttribute('Id'), r.getAttribute('Target'));
-  const sheets = tags(wb, 'sheet').map((s, i) => { let t = rels.get(s.getAttribute('r:id')) || `worksheets/sheet${i + 1}.xml`; t = t.replace(/^\/?(xl\/)?/, 'xl/'); return { name: s.getAttribute('name'), path: t, hidden: s.getAttribute('state') === 'hidden' }; }).filter(s => !s.hidden);
+  const shared = z.has('xl/sharedStrings.xml') ? tags(await lx('xl/sharedStrings.xml'), 'si').map(si => [...si.getElementsByTagName('t')].filter(t => t.parentNode.nodeName !== 'rPh').map(t => t.textContent).join('')) : [];
+  const wb = await lx('xl/workbook.xml'), rels = new Map(), date1904 = wb.getElementsByTagName('workbookPr')[0]?.getAttribute('date1904') === '1';
+  for (const r of tags(await lx('xl/_rels/workbook.xml.rels'), 'Relationship')) rels.set(r.getAttribute('Id'), r.getAttribute('Target'));
+  const sheets = tags(wb, 'sheet').map((s, i) => { let t = rels.get(s.getAttribute('r:id')) || `worksheets/sheet${i + 1}.xml`; t = t.replace(/^\/?(xl\/)?/, 'xl/'); return { name: s.getAttribute('name'), path: t, hidden: s.getAttribute('state') === 'hidden' }; }).filter(s => !s.hidden && !s.path.includes('chartsheets') && z.has(s.path));
   const BORDER_W = { thin: 1, hair: 1, medium: 2, thick: 3, double: 3, dashed: 1, dotted: 1 };
   const side = b => b ? `${BORDER_W[b.sty] || 1}px ${b.sty === 'dashed' ? 'dashed' : b.sty === 'dotted' ? 'dotted' : b.sty === 'double' ? 'double' : 'solid'} ${b.color}` : '';
 
   const build = async sh => {
-    const x = await z.xml(sh.path), MAXR = 3000, MAXC = 80;
+    const MAXR = 3000, MAXC = 80, { doc: x, truncated } = await looseXml(z, sh.path, MAXR);
     const cols = new Map(), merges = [], cover = new Set(), cells = [], heights = new Map();
     for (const c of tags(x, 'col')) for (let i = +c.getAttribute('min'); i <= Math.min(+c.getAttribute('max'), MAXC); i++) cols.set(i - 1, { w: +c.getAttribute('width') || 8.43, hide: c.getAttribute('hidden') === '1' });
     const fmtPr = x.getElementsByTagName('sheetFormatPr')[0], defW = +fmtPr?.getAttribute('defaultColWidth') || 8.43, defH = +fmtPr?.getAttribute('defaultRowHeight') || 15;
@@ -386,7 +402,7 @@ async function renderXlsx(box, z) {
         if (cols.get(c)?.hide || cover.has(r + ',' + c)) continue;
         const cell = cells[r]?.[c], xf = st.xfs[cell?.s || 0] || {}, f = st.fonts[xf.font] || base, fill = st.fills[xf.fill], bd = st.borders[xf.border] || {};
         const m = merges.find(q => q.r1 === r && q.c1 === c);
-        let text = cell ? (cell.t === 's' || cell.t === 'inlineStr' || cell.t === 'str' || cell.t === 'e' ? cell.val : formatCell(cell.val, st.fmts.get(xf.fmt) || BUILTIN_FMT[xf.fmt])) : '';
+        let text = cell ? (cell.t === 's' || cell.t === 'inlineStr' || cell.t === 'str' || cell.t === 'e' ? cell.val : formatCell(cell.val, st.fmts.get(xf.fmt) || BUILTIN_FMT[xf.fmt], date1904)) : '';
         const numeric = cell && !['s', 'inlineStr', 'str', 'e', 'b'].includes(cell.t) && cell.val !== '' && !isNaN(+cell.val);
         const align = xf.h && xf.h !== 'general' ? xf.h : numeric ? 'right' : cell?.t === 'b' || cell?.t === 'e' ? 'center' : 'left';
         const css = [`text-align:${align === 'centerContinuous' ? 'center' : align}`, `vertical-align:${xf.v === 'top' ? 'top' : xf.v === 'center' ? 'middle' : 'bottom'}`];
@@ -396,13 +412,23 @@ async function renderXlsx(box, z) {
         if (f.sz && f.sz !== base.sz) css.push(`font-size:${f.sz * 4 / 3}px`);
         if (f.name && f.name !== base.name) css.push(`font-family:"${f.name}",sans-serif`);
         for (const sd of ['left', 'right', 'top', 'bottom']) if (bd[sd]) css.push(`border-${sd}:${side(bd[sd])}`);
-        if (xf.wrap) css.push('white-space:normal;word-break:break-word'); if (xf.indent) css.push(`padding-left:${4 + xf.indent * 9}px`);
-        tr.append(h('td', { style: css.join(';'), colspan: m ? m.c2 - m.c1 + 1 : null, rowspan: m ? m.r2 - m.r1 + 1 : null }, text));
+        if (xf.indent) css.push(`padding-left:${4 + xf.indent * 9}px`);
+        let content = text;
+        const rowPx = Math.round(((ht || defH) * 4 / 3));
+        if (xf.rot && text !== '') {                                // rotated text (e.g. vertical column headings)
+          const stacked = xf.rot === 255, up = xf.rot > 0 && xf.rot <= 90;
+          content = h('div', { class: 'xrot', style: `writing-mode:vertical-rl;${stacked ? 'text-orientation:upright;' : ''}${up ? 'transform:rotate(180deg);' : ''}max-height:${m ? 9999 : rowPx}px;margin:auto` }, text);
+          css.push('text-align:center', 'padding:0');
+        } else if (xf.wrap && text !== '') {                        // wrapped text keeps the row height, like Excel
+          css.push('white-space:normal;overflow-wrap:break-word');
+          content = h('div', { class: 'xwrap', style: `max-height:${m ? Math.max(rowPx, (m.r2 - m.r1 + 1) * rowPx) : rowPx}px` }, text);
+        }
+        tr.append(h('td', { style: css.join(';'), colspan: m ? m.c2 - m.c1 + 1 : null, rowspan: m ? m.r2 - m.r1 + 1 : null }, content));
       }
       tb.append(tr);
     }
     const colgroup = h('colgroup', {}, h('col', { style: 'width:46px' }), ...Array.from({ length: maxC + 1 }, (_, c) => cols.get(c)?.hide ? null : h('col', { style: `width:${widthPx(c)}px` })));
-    return h('div', { class: 'xlscroll' }, h('table', { class: 'xl', style: `font-size:${base.sz * 4 / 3}px;font-family:"${base.name || 'Calibri'}",Carlito,Arial,sans-serif` }, colgroup, h('thead', {}, head), tb));
+    return h('div', {}, truncated && h('div', { class: 'tablemeta' }, `Showing the first ${MAXR.toLocaleString()} rows`), h('div', { class: 'xlscroll' }, h('table', { class: 'xl', style: `font-size:${base.sz * 4 / 3}px;font-family:"${base.name || 'Calibri'}",Carlito,Arial,sans-serif` }, colgroup, h('thead', {}, head), tb)));
   };
   const view = h('div', {}), tabs = h('div', { class: 'seg tabs' });
   const show = async i => {
