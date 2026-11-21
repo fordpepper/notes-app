@@ -408,11 +408,12 @@ async function renderViewer(path, k) {
   const acts = h('div', { class: 'viewer-actions' }, h('button', { class: 'tonal', onclick: () => downloadFile(path) }, icon('download'), 'Download'));
   try {
     const r = M.files.get(path);
-    if (k === 'font' || k === 'office' || k === 'archive') {            // rich previews, built in docs.js
+    if (k === 'font' || k === 'office' || k === 'archive' || k === 'pdf') {            // rich previews, built in docs.js
       const box = h('div', { class: 'docview' });
       const blob = await M.getBlob(path);
       if (S.current !== path) return;
       v.replaceChildren(box, acts);
+      if (k === 'pdf') acts.append(h('a', { class: 'ghost', href: URL.createObjectURL(blob), target: '_blank', rel: 'noopener' }, icon('open'), 'Open in new tab'));
       try { await (await import('./docs.js')).renderBinary(box, k, path, blob); }
       catch (e) { console.warn(e); v.replaceChildren(fileCard(path, M.files.get(path)), acts); }
       return;

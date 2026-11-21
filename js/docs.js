@@ -154,37 +154,7 @@ export async function readZip(blob) {
 const tags = (n, name) => [...n.getElementsByTagName(name)];
 const textOf = (n, name) => tags(n, name).map(x => x.textContent).join('');
 
-/* ------------------------------------------------------------------ Word / OpenDocument text */
-async function renderDocx(box, z) {
-  const doc = await z.xml('word/document.xml'), rels = new Map();
-  if (z.has('word/_rels/document.xml.rels')) for (const r of tags(await z.xml('word/_rels/document.xml.rels'), 'Relationship')) rels.set(r.getAttribute('Id'), r.getAttribute('Target'));
-  const urls = [];
-  const run = r => {
-    let out = [];
-    for (const c of r.children) {
-      if (c.nodeName === 'w:t') out.push(c.textContent);
-      else if (c.nodeName === 'w:tab') out.push('\t');
-      else if (c.nodeName === 'w:br') out.push(h('br'));
-      else if (c.nodeName === 'w:drawing') for (const b of tags(c, 'a:blip')) { const t = rels.get(b.getAttribute('r:embed')), img = h('img', { alt: '' }); if (t && z.has('word/' + t)) z.bytes('word/' + t).then(by => { const u = URL.createObjectURL(new Blob([by], { type: U.mimeOf(t) })); urls.push(u); img.src = u; }); out.push(img); }
-    }
-    const pr = r.getElementsByTagName('w:rPr')[0], on = n => { const e = pr?.getElementsByTagName(n)[0]; return e && e.getAttribute('w:val') !== '0' && e.getAttribute('w:val') !== 'false'; };
-    if (on('w:b')) out = [h('b', {}, out)]; if (on('w:i')) out = [h('i', {}, out)]; if (on('w:u')) out = [h('u', {}, out)];
-    return out;
-  };
-  const para = p => {
-    const style = p.getElementsByTagName('w:pStyle')[0]?.getAttribute('w:val') || '', hm = /^Heading(\d)$/i.exec(style) || (/^Title$/i.test(style) ? [0, 1] : null);
-    const kids = [...p.getElementsByTagName('w:r')].flatMap(run);
-    const li = p.getElementsByTagName('w:numPr')[0];
-    if (!kids.length && !hm) return h('p', { class: 'gap' });
-    return h(hm ? 'h' + Math.min(4, +hm[1]) : 'p', { class: li ? 'li' : '' }, li && '•  ', kids);
-  };
-  const body = doc.getElementsByTagName('w:body')[0], out = [];
-  for (const n of body ? body.children : []) {
-    if (n.nodeName === 'w:p') out.push(para(n));
-    else if (n.nodeName === 'w:tbl') out.push(h('table', { class: 'docx-table' }, h('tbody', {}, [...n.children].filter(x => x.nodeName === 'w:tr').map(tr => h('tr', {}, [...tr.children].filter(x => x.nodeName === 'w:tc').map(tc => h('td', {}, tags(tc, 'w:p').map(para))))))));
-  }
-  box.replaceChildren(h('article', { class: 'md docpage' }, out.length ? out : h('p', {}, 'This document is empty.')));
-}
+/* ------------------------------------------------------------------ OpenDocument text */
 async function renderOdt(box, z) {
   const doc = await z.xml('content.xml'), out = [];
   const walk = n => { for (const c of n.children) {
@@ -198,49 +168,12 @@ async function renderOdt(box, z) {
 
 /* ------------------------------------------------------------------ Excel / OpenDocument spreadsheet */
 const colIndex = ref => { let n = 0; for (const ch of /^[A-Z]+/i.exec(ref)[0].toUpperCase()) n = n * 26 + ch.charCodeAt(0) - 64; return n - 1; };
-async function renderXlsx(box, z) {
-  const shared = z.has('xl/sharedStrings.xml') ? tags(await z.xml('xl/sharedStrings.xml'), 'si').map(si => textOf(si, 't')) : [];
-  const wb = await z.xml('xl/workbook.xml'), rels = new Map();
-  for (const r of tags(await z.xml('xl/_rels/workbook.xml.rels'), 'Relationship')) rels.set(r.getAttribute('Id'), r.getAttribute('Target'));
-  const sheets = tags(wb, 'sheet').map((s, i) => { let t = rels.get(s.getAttribute('r:id')) || `worksheets/sheet${i + 1}.xml`; t = t.replace(/^\/?(xl\/)?/, 'xl/'); return { name: s.getAttribute('name'), path: t }; });
-  const load = async s => {
-    const x = await z.xml(s.path), rows = [];
-    for (const r of tags(x, 'row')) {
-      const ri = +r.getAttribute('r') - 1, row = rows[ri] = [];
-      for (const c of tags(r, 'c')) {
-        const t = c.getAttribute('t'), v = c.getElementsByTagName('v')[0]?.textContent ?? '';
-        row[colIndex(c.getAttribute('r'))] = t === 's' ? shared[+v] ?? '' : t === 'inlineStr' ? textOf(c, 't') : t === 'b' ? (v === '1' ? 'TRUE' : 'FALSE') : v;
-      }
-      if (rows.length > 20000) break;
-    }
-    return Array.from(rows, r => r || []);
-  };
-  const view = h('div', {}), tabs = h('div', { class: 'seg tabs' });
-  const show = async i => {
-    [...tabs.children].forEach((b, j) => b.classList.toggle('on', i === j));
-    view.replaceChildren(h('div', { class: 'filecard' }, 'Loading…'));
-    const rows = await load(sheets[i]);
-    view.replaceChildren(rows.length ? tableOf(rows, { header: false }) : h('div', { class: 'filecard' }, 'This sheet is empty.'));
-  };
-  sheets.forEach((s, i) => tabs.append(h('button', { onclick: () => show(i) }, s.name)));
-  box.replaceChildren(sheets.length > 1 && tabs, view); await show(0);
-}
+const colName = i => { let s = ''; for (i++; i > 0; i = (i - 1) / 26 | 0) s = String.fromCharCode(65 + (i - 1) % 26) + s; return s; };
 async function renderOds(box, z) {
   const doc = await z.xml('content.xml'), tbls = tags(doc, 'table:table');
   const grid = t => tags(t, 'table:table-row').slice(0, 5000).flatMap(r => { const row = []; for (const c of [...r.children].filter(c => c.nodeName === 'table:table-cell' || c.nodeName === 'table:covered-table-cell')) { const rep = Math.min(+c.getAttribute('table:number-columns-repeated') || 1, 50); for (let i = 0; i < rep; i++) row.push(c.textContent); } while (row.length && row[row.length - 1] === '') row.pop(); return [row]; });
   const rows = grid(tbls[0] || doc.documentElement);
   box.replaceChildren(tableOf(rows, { header: false }));
-}
-
-/* ------------------------------------------------------------------ PowerPoint */
-async function renderPptx(box, z) {
-  const slides = z.entries.map(e => /^ppt\/slides\/slide(\d+)\.xml$/.exec(e.name)).filter(Boolean).sort((a, b) => a[1] - b[1]);
-  const cards = [];
-  for (const [name, n] of slides) {
-    const x = await z.xml(name), lines = tags(x, 'a:p').map(p => textOf(p, 'a:t').trim()).filter(Boolean);
-    cards.push(h('section', { class: 'slide' }, h('small', {}, `Slide ${n}`), lines.length ? [h('h3', {}, lines[0]), ...lines.slice(1).map(l => h('p', {}, l))] : h('p', { class: 'dim' }, 'No text on this slide')));
-  }
-  box.replaceChildren(h('div', { class: 'slides' }, cards.length ? cards : h('div', { class: 'filecard' }, 'No slides found.')));
 }
 
 /* ------------------------------------------------------------------ archives */
@@ -273,13 +206,210 @@ export function renderText(box, src, path, type) {
 export async function renderBinary(box, kind, path, blob) {
   const ext = U.extOf(path);
   if (kind === 'font') return renderFont(box, blob, U.basename(path));
+  if (kind === 'pdf') return renderPdf(box, blob);
   if (!U.ZIPPED.has(ext)) throw new Error('No preview for this format');
   const z = await readZip(blob);
   if (kind === 'archive') return renderArchive(box, z);
-  if (ext === 'docx') return renderDocx(box, z);
+  if (ext === 'docx') return renderDocx(box, blob);
   if (ext === 'xlsx') return renderXlsx(box, z);
-  if (ext === 'pptx') return renderPptx(box, z);
+  if (ext === 'pptx') return renderPptx(box, blob, z);
   if (ext === 'odt') return renderOdt(box, z);
   if (ext === 'ods') return renderOds(box, z);
   return renderArchive(box, z);        // odp etc.: show what's inside
+}
+
+/* ------------------------------------------------------------------ PDF (pdf.js, loaded when you open one) */
+let pdfjs;
+async function loadPdfjs() {
+  if (!pdfjs) {
+    pdfjs = await import('../vendor/pdf.min.js');
+    pdfjs.GlobalWorkerOptions.workerSrc = new URL('../vendor/pdf.worker.min.js', import.meta.url).href;
+  }
+  return pdfjs;
+}
+/** Pages are drawn exactly as in the file, fitted to the available width, and only when they scroll into view. */
+export async function renderPdf(box, blob) {
+  const P = await loadPdfjs();
+  const doc = await P.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) }).promise;
+  const wrap = h('div', { class: 'pdfdoc' });
+  box.replaceChildren(h('div', { class: 'tablemeta' }, `${doc.numPages} page${doc.numPages === 1 ? '' : 's'}`), wrap);
+  const first = (await doc.getPage(1)).getViewport({ scale: 1 }), holders = [];
+  const cssWidth = () => Math.max(200, Math.min(wrap.clientWidth || 800, 1000));
+  const draw = async el => {
+    const n = +el.dataset.n, page = await doc.getPage(n), vp1 = page.getViewport({ scale: 1 }), k = cssWidth() / vp1.width;
+    const vp = page.getViewport({ scale: k }), dpr = Math.min(devicePixelRatio || 1, 2.5), hi = page.getViewport({ scale: k * dpr });
+    if (!el.isConnected) return;
+    el.style.width = vp.width + 'px'; el.style.height = vp.height + 'px';
+    const cv = h('canvas', { width: Math.floor(hi.width), height: Math.floor(hi.height) });
+    el.replaceChildren(cv);
+    await page.render({ canvasContext: cv.getContext('2d'), canvas: cv, viewport: hi }).promise;
+    const tl = h('div', { class: 'textLayer' }); tl.style.setProperty('--scale-factor', vp.scale); el.append(tl);
+    new P.TextLayer({ textContentSource: page.streamTextContent(), container: tl, viewport: vp }).render().catch(() => {});
+  };
+  const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { io.unobserve(e.target); draw(e.target).catch(console.warn); } }), { rootMargin: '900px 0px' });
+  const layout = () => {
+    const w = cssWidth();
+    holders.forEach(el => { io.unobserve(el); el.replaceChildren(); el.style.width = w + 'px'; el.style.height = Math.round(w * first.height / first.width) + 'px'; io.observe(el); });
+  };
+  for (let n = 1; n <= doc.numPages; n++) { const el = h('div', { class: 'pdfpage', 'data-n': n }); holders.push(el); wrap.append(el); }
+  layout();
+  let lastW = cssWidth(), t;
+  new ResizeObserver(() => { clearTimeout(t); t = setTimeout(() => { if (!wrap.isConnected) return; const w = cssWidth(); if (Math.abs(w - lastW) > 8) { lastW = w; layout(); } }, 200); }).observe(wrap);
+}
+
+/* ------------------------------------------------------------------ Word (docx-preview: real page layout) */
+function fit(holder, selector) {
+  const apply = () => {
+    const pages = [...holder.querySelectorAll(selector)];
+    if (!pages.length || !holder.clientWidth) return;
+    const w = Math.max(...pages.map(p => p.offsetWidth));
+    holder.style.setProperty('--fit', Math.min(1, (holder.clientWidth - 2) / w));
+  };
+  new ResizeObserver(apply).observe(holder); apply();
+}
+async function renderDocx(box, blob) {
+  const { renderAsync } = await import('../vendor/docx-preview.js');
+  const holder = h('div', { class: 'docxview' });
+  box.replaceChildren(holder);
+  await renderAsync(blob, holder, holder, { className: 'docx', inWrapper: true, breakPages: true, ignoreLastRenderedPageBreak: true, renderHeaders: true, renderFooters: true, renderFootnotes: true, renderEndnotes: true, useBase64URL: true });
+  // Word draws bullets with the Symbol / Wingdings fonts, which most devices don't have: swap in real characters.
+  const BUL = { 0xF0B7: '•', 0xF0A7: '▪', 0xF0D8: '➢', 0xF0FC: '✓', 0xF076: '❖', 0xF0A8: '◻' };
+  for (const st of holder.querySelectorAll('style')) st.textContent = st.textContent
+    .replace(/content:\s*"([\uE000-\uF8FF])/g, (_, c) => `content:"${BUL[c.charCodeAt(0)] || '•'}`)
+    .replace(/font-family:\s*"?(Symbol|Wingdings[^;"]*|Webdings)"?\s*;/gi, 'font-family:inherit;');
+  fit(holder, '.docx-wrapper > section.docx');
+}
+
+/* ------------------------------------------------------------------ PowerPoint (pptx-preview: slides as designed) */
+async function renderPptx(box, blob, z) {
+  const { init } = await import('../vendor/pptx-preview.js');
+  let ratio = 9 / 16;
+  try { const s = (await z.xml('ppt/presentation.xml')).getElementsByTagName('p:sldSz')[0]; ratio = +s.getAttribute('cy') / +s.getAttribute('cx'); } catch { /* keep 16:9 */ }
+  const holder = h('div', { class: 'pptxview' });
+  box.replaceChildren(holder);
+  const width = Math.max(260, Math.min(holder.clientWidth || 900, 1100));
+  const viewer = init(holder, { width, height: Math.round(width * ratio), mode: 'list' });
+  await viewer.preview(await blob.arrayBuffer());
+}
+
+/* ------------------------------------------------------------------ Excel (cell styles, widths, merges, number formats) */
+const BUILTIN_FMT = { 1: '0', 2: '0.00', 3: '#,##0', 4: '#,##0.00', 9: '0%', 10: '0.00%', 14: 'yyyy-mm-dd', 15: 'd-mmm-yy', 16: 'd-mmm', 17: 'mmm-yy', 22: 'yyyy-mm-dd hh:mm', 45: 'mm:ss', 46: '[h]:mm:ss', 47: 'mm:ss.0' };
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+function formatCell(v, code) {
+  if (v === '' || v == null) return '';
+  if (!code || /^general$/i.test(code)) { const n = +v; return v !== '' && !isNaN(n) && /^-?[\d.]+(e[+-]?\d+)?$/i.test(v) ? String(+n.toPrecision(12)) : v; }
+  const n = +v;
+  if (isNaN(n)) return v;
+  const clean = code.split(';')[n < 0 && code.includes(';') ? 1 : 0].replace(/"([^"]*)"/g, '$1').replace(/\[\$([^\]-]*)[^\]]*\]/g, '$1').replace(/\[[^\]]*\]/g, m => /^\[(h+|m+|s+)\]$/i.test(m) ? m : '').replace(/_.|\\./g, '').replace(/\*./g, '');
+  if (/[dmyhs]/i.test(clean.replace(/[#0.,%]/g, '')) && /y|d|h|s|m/i.test(clean) && !/^[#0,.%$€£\s-]+$/.test(clean)) {   // date / time
+    const dt = new Date(Math.round((n - 25569) * 86400000)), p = x => String(x).padStart(2, '0');
+    if (isNaN(dt)) return v;
+    const Y = dt.getUTCFullYear(), M = dt.getUTCMonth(), D = dt.getUTCDate(), hh = dt.getUTCHours(), mi = dt.getUTCMinutes(), ss = dt.getUTCSeconds(), ampm = /am\/pm/i.test(clean);
+    return clean.replace(/am\/pm/ig, hh < 12 ? 'AM' : 'PM').replace(/yyyy|yy|mmmm|mmm|mm|m|dddd|ddd|dd|d|hh|h|ss|s/gi, t => {
+      switch (t.toLowerCase()) {
+        case 'yyyy': return Y; case 'yy': return p(Y % 100); case 'mmmm': return MONTHS[M]; case 'mmm': return MONTHS[M].slice(0, 3);
+        case 'mm': return /h|s/i.test(clean) && !/[dy]/i.test(clean) ? p(mi) : p(M + 1); case 'm': return M + 1; case 'dd': return p(D); case 'd': return D;
+        case 'hh': return p(ampm ? (hh % 12) || 12 : hh); case 'h': return ampm ? (hh % 12) || 12 : hh; case 'ss': return p(ss); case 's': return ss; default: return t;
+      }
+    });
+  }
+  const pct = clean.includes('%'), dec = (/\.(0+)/.exec(clean)?.[1].length) ?? ((/\.(#+)/.exec(clean)?.[1].length) ? 0 : 0), thou = /#,#|0,0/.test(clean);
+  let x = pct ? n * 100 : n; const neg = x < 0 && !code.includes(';'); x = Math.abs(x);
+  let s = x.toFixed(dec); if (thou) s = s.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const pre = /^([^#0.,]*)/.exec(clean)[1].replace(/%/g, ''), suf = /([^#0.,%]*)%?$/.exec(clean)[1];
+  return (neg ? '-' : '') + pre + s + (pct ? '%' : '') + suf.replace(/%/g, '');
+}
+function themeColors(x) {
+  const names = ['lt1', 'dk1', 'lt2', 'dk2', 'accent1', 'accent2', 'accent3', 'accent4', 'accent5', 'accent6'], out = [];
+  const scheme = x?.getElementsByTagName('a:clrScheme')[0];
+  for (const n of names) { const e = scheme?.getElementsByTagName('a:' + n)[0]?.firstElementChild; out.push(e ? '#' + (e.getAttribute('lastClr') || e.getAttribute('val')) : { lt1: '#ffffff', dk1: '#000000' }[n] || '#808080'); }
+  return out;
+}
+const INDEXED = ['#000000', '#ffffff', '#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff'];
+function tint(hex, t) {
+  const c = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
+  return '#' + c.map(v => Math.round(t < 0 ? v * (1 + t) : v + (255 - v) * t).toString(16).padStart(2, '0')).join('');
+}
+async function renderXlsx(box, z) {
+  const theme = themeColors(z.has('xl/theme/theme1.xml') ? await z.xml('xl/theme/theme1.xml') : null);
+  const color = e => {
+    if (!e) return null;
+    if (e.getAttribute('rgb')) return '#' + e.getAttribute('rgb').slice(-6);
+    if (e.getAttribute('theme') != null) { const c = theme[+e.getAttribute('theme')] || '#000000'; return +e.getAttribute('tint') ? tint(c, +e.getAttribute('tint')) : c; }
+    if (e.getAttribute('indexed') != null) return INDEXED[+e.getAttribute('indexed')] || null;
+    return null;
+  };
+  const st = { fonts: [], fills: [], borders: [], xfs: [], fmts: new Map() };
+  if (z.has('xl/styles.xml')) {
+    const s = await z.xml('xl/styles.xml');
+    for (const n of tags(s, 'numFmt')) st.fmts.set(+n.getAttribute('numFmtId'), n.getAttribute('formatCode'));
+    const kids = (tag, child) => tags(s, tag)[0] ? [...tags(s, tag)[0].children].filter(c => c.nodeName === child) : [];
+    st.fonts = kids('fonts', 'font').map(f => ({ b: !!f.getElementsByTagName('b')[0], i: !!f.getElementsByTagName('i')[0], u: !!f.getElementsByTagName('u')[0], sz: +f.getElementsByTagName('sz')[0]?.getAttribute('val') || 11, name: f.getElementsByTagName('name')[0]?.getAttribute('val'), color: color(f.getElementsByTagName('color')[0]) }));
+    st.fills = kids('fills', 'fill').map(f => { const p = f.getElementsByTagName('patternFill')[0]; return p && p.getAttribute('patternType') === 'solid' ? color(p.getElementsByTagName('fgColor')[0]) : null; });
+    st.borders = kids('borders', 'border').map(b => Object.fromEntries(['left', 'right', 'top', 'bottom'].map(side => { const e = b.getElementsByTagName(side)[0], sty = e?.getAttribute('style'); return [side, sty ? { sty, color: color(e.getElementsByTagName('color')[0]) || '#000000' } : null]; })));
+    st.xfs = [...(tags(s, 'cellXfs')[0]?.children || [])].map(x => { const al = x.getElementsByTagName('alignment')[0]; return { fmt: +x.getAttribute('numFmtId') || 0, font: +x.getAttribute('fontId') || 0, fill: +x.getAttribute('fillId') || 0, border: +x.getAttribute('borderId') || 0, h: al?.getAttribute('horizontal'), v: al?.getAttribute('vertical'), wrap: al?.getAttribute('wrapText') === '1', indent: +al?.getAttribute('indent') || 0 }; });
+  }
+  const base = st.fonts[0] || { sz: 11, name: 'Calibri' };
+  const shared = z.has('xl/sharedStrings.xml') ? tags(await z.xml('xl/sharedStrings.xml'), 'si').map(si => [...si.getElementsByTagName('t')].filter(t => t.parentNode.nodeName !== 'rPh').map(t => t.textContent).join('')) : [];
+  const wb = await z.xml('xl/workbook.xml'), rels = new Map();
+  for (const r of tags(await z.xml('xl/_rels/workbook.xml.rels'), 'Relationship')) rels.set(r.getAttribute('Id'), r.getAttribute('Target'));
+  const sheets = tags(wb, 'sheet').map((s, i) => { let t = rels.get(s.getAttribute('r:id')) || `worksheets/sheet${i + 1}.xml`; t = t.replace(/^\/?(xl\/)?/, 'xl/'); return { name: s.getAttribute('name'), path: t, hidden: s.getAttribute('state') === 'hidden' }; }).filter(s => !s.hidden);
+  const BORDER_W = { thin: 1, hair: 1, medium: 2, thick: 3, double: 3, dashed: 1, dotted: 1 };
+  const side = b => b ? `${BORDER_W[b.sty] || 1}px ${b.sty === 'dashed' ? 'dashed' : b.sty === 'dotted' ? 'dotted' : b.sty === 'double' ? 'double' : 'solid'} ${b.color}` : '';
+
+  const build = async sh => {
+    const x = await z.xml(sh.path), MAXR = 3000, MAXC = 80;
+    const cols = new Map(), merges = [], cover = new Set(), cells = [], heights = new Map();
+    for (const c of tags(x, 'col')) for (let i = +c.getAttribute('min'); i <= Math.min(+c.getAttribute('max'), MAXC); i++) cols.set(i - 1, { w: +c.getAttribute('width') || 8.43, hide: c.getAttribute('hidden') === '1' });
+    const fmtPr = x.getElementsByTagName('sheetFormatPr')[0], defW = +fmtPr?.getAttribute('defaultColWidth') || 8.43, defH = +fmtPr?.getAttribute('defaultRowHeight') || 15;
+    let maxR = 0, maxC = 0;
+    for (const m of tags(x, 'mergeCell')) { const [a, b] = m.getAttribute('ref').split(':'); if (!b) continue; const r1 = +/\d+/.exec(a) - 1, c1 = colIndex(a), r2 = +/\d+/.exec(b) - 1, c2 = colIndex(b); merges.push({ r1, c1, r2, c2 }); for (let r = r1; r <= r2; r++) for (let c = c1; c <= c2; c++) if (r !== r1 || c !== c1) cover.add(r + ',' + c); maxR = Math.max(maxR, r2); maxC = Math.max(maxC, c2); }
+    for (const r of tags(x, 'row')) {
+      const ri = +r.getAttribute('r') - 1; if (ri >= MAXR) break;
+      if (r.getAttribute('ht')) heights.set(ri, +r.getAttribute('ht'));
+      if (r.getAttribute('hidden') === '1') heights.set(ri, 0);
+      for (const c of tags(r, 'c')) {
+        const ci = colIndex(c.getAttribute('r')); if (ci >= MAXC) continue;
+        const t = c.getAttribute('t'), vEl = c.getElementsByTagName('v')[0], v = vEl?.textContent ?? '';
+        const val = t === 's' ? shared[+v] ?? '' : t === 'inlineStr' ? textOf(c, 't') : t === 'b' ? (v === '1' ? 'TRUE' : 'FALSE') : t === 'e' ? v : v;
+        cells[ri] ||= []; cells[ri][ci] = { val, t, s: +c.getAttribute('s') || 0 };
+        if (val !== '' || +c.getAttribute('s')) { maxR = Math.max(maxR, ri); maxC = Math.max(maxC, ci); }
+      }
+    }
+    const widthPx = c => Math.round(((cols.get(c)?.w ?? defW) * 7) + 5);
+    const tb = h('tbody', {});
+    const head = h('tr', {}, h('th', { class: 'corner' }), ...Array.from({ length: maxC + 1 }, (_, c) => cols.get(c)?.hide ? null : h('th', { class: 'colh' }, colName(c))));
+    for (let r = 0; r <= maxR; r++) {
+      const ht = heights.get(r); if (ht === 0) continue;
+      const tr = h('tr', { style: `height:${Math.round((ht || defH) * 4 / 3)}px` }, h('th', { class: 'rowh' }, r + 1));
+      for (let c = 0; c <= maxC; c++) {
+        if (cols.get(c)?.hide || cover.has(r + ',' + c)) continue;
+        const cell = cells[r]?.[c], xf = st.xfs[cell?.s || 0] || {}, f = st.fonts[xf.font] || base, fill = st.fills[xf.fill], bd = st.borders[xf.border] || {};
+        const m = merges.find(q => q.r1 === r && q.c1 === c);
+        let text = cell ? (cell.t === 's' || cell.t === 'inlineStr' || cell.t === 'str' || cell.t === 'e' ? cell.val : formatCell(cell.val, st.fmts.get(xf.fmt) || BUILTIN_FMT[xf.fmt])) : '';
+        const numeric = cell && !['s', 'inlineStr', 'str', 'e', 'b'].includes(cell.t) && cell.val !== '' && !isNaN(+cell.val);
+        const align = xf.h && xf.h !== 'general' ? xf.h : numeric ? 'right' : cell?.t === 'b' || cell?.t === 'e' ? 'center' : 'left';
+        const css = [`text-align:${align === 'centerContinuous' ? 'center' : align}`, `vertical-align:${xf.v === 'top' ? 'top' : xf.v === 'center' ? 'middle' : 'bottom'}`];
+        if (fill) css.push(`background:${fill}`);
+        if (f.color) css.push(`color:${f.color}`);
+        if (f.b) css.push('font-weight:700'); if (f.i) css.push('font-style:italic'); if (f.u) css.push('text-decoration:underline');
+        if (f.sz && f.sz !== base.sz) css.push(`font-size:${f.sz * 4 / 3}px`);
+        if (f.name && f.name !== base.name) css.push(`font-family:"${f.name}",sans-serif`);
+        for (const sd of ['left', 'right', 'top', 'bottom']) if (bd[sd]) css.push(`border-${sd}:${side(bd[sd])}`);
+        if (xf.wrap) css.push('white-space:normal;word-break:break-word'); if (xf.indent) css.push(`padding-left:${4 + xf.indent * 9}px`);
+        tr.append(h('td', { style: css.join(';'), colspan: m ? m.c2 - m.c1 + 1 : null, rowspan: m ? m.r2 - m.r1 + 1 : null }, text));
+      }
+      tb.append(tr);
+    }
+    const colgroup = h('colgroup', {}, h('col', { style: 'width:46px' }), ...Array.from({ length: maxC + 1 }, (_, c) => cols.get(c)?.hide ? null : h('col', { style: `width:${widthPx(c)}px` })));
+    return h('div', { class: 'xlscroll' }, h('table', { class: 'xl', style: `font-size:${base.sz * 4 / 3}px;font-family:"${base.name || 'Calibri'}",Carlito,Arial,sans-serif` }, colgroup, h('thead', {}, head), tb));
+  };
+  const view = h('div', {}), tabs = h('div', { class: 'seg tabs' });
+  const show = async i => {
+    [...tabs.children].forEach((b, j) => b.classList.toggle('on', i === j));
+    view.replaceChildren(h('div', { class: 'filecard' }, 'Loading…'));
+    view.replaceChildren(await build(sheets[i]));
+  };
+  sheets.forEach((s, i) => tabs.append(h('button', { onclick: () => show(i) }, s.name)));
+  box.replaceChildren(sheets.length > 1 && tabs, view); await show(0);
 }

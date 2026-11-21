@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { createMock } from './mock-github.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SHOTS = path.join(path.dirname(fileURLToPath(import.meta.url)), '_shots');
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const SHOTS = path.join(HERE, '_shots');
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x'); const f = path.join(ROOT, u.pathname === '/' ? 'index.html' : decodeURIComponent(u.pathname));
@@ -49,7 +50,7 @@ gh.seed({
   'data.csv': 'name,qty,price\n"Smith, J",3,4.50\nDoe,10,"1,200"\n', 'config.json': '{"name":"notes","list":[1,2,{"deep":true}],"empty":[],"nested":{"a":null,"b":"text"}}',
   'bad.json': '{"oops": }', 'script.py': '# comment\ndef greet(name):\n    return "hi " + name  # trailing\nprint(greet("x"), 42)\n', 'page.html': '<h1 id="x">Hello page</h1>',
   'Guide.md': '# Guide\n\n```js\nconst a = "str"; // note\nfunction f() { return 1 }\n```\n',
-  'report.docx': docx, 'budget.xlsx': xlsx, 'deck.pptx': pptx, 'bundle.zip': arch, 'noext-table': Buffer.from('plain text file\n'),
+  'report.docx': fs.readFileSync(path.join(HERE, 'fixtures/report.docx')), 'budget.xlsx': fs.readFileSync(path.join(HERE, 'fixtures/budget.xlsx')), 'deck.pptx': fs.readFileSync(path.join(HERE, 'fixtures/deck.pptx')), 'doc.pdf': fs.readFileSync(path.join(HERE, 'fixtures/doc.pdf')), 'bundle.zip': arch, 'noext-table': Buffer.from('plain text file\n'),
 });
 let fails = 0; const errors = [];
 const ok = (name, c, extra) => { console.log((c ? 'PASS ' : 'FAIL ') + name + (!c && extra ? '  ' + extra : '')); if (!c) fails++; };
@@ -90,15 +91,28 @@ ok('html renders in a sandboxed frame', (await p.locator('iframe.htmlview').getA
 await open('Guide'); await p.click('#modes button[title=Preview]'); await p.waitForSelector('#preview pre code .tk-k');
 ok('markdown code blocks are highlighted', true);
 
-await open('report.docx'); await p.waitForSelector('#viewer .docpage');
-ok('docx: headings, bold and tables', await p.locator('#viewer h1').innerText() === 'Quarterly report' && await p.locator('#viewer b').innerText() === 'Bold words' && (await p.locator('#viewer td').allInnerTexts()).join() === 'Cell A,Cell B');
+await open('report.docx'); await p.waitForSelector('#viewer section.docx');
+await p.waitForFunction(() => [...document.querySelectorAll('#viewer img')].every(i => i.complete && i.naturalWidth > 0));
+const dx = await p.evaluate(() => { const v = document.querySelector('#viewer'); const red = [...v.querySelectorAll('span')].find(s => /bold red/.test(s.textContent)); return { text: v.innerText, red: red && getComputedStyle(red).color, bold: red && +getComputedStyle(red).fontWeight, rows: v.querySelectorAll('table tr').length, imgs: v.querySelectorAll('img').length, page: v.querySelector('section.docx').getBoundingClientRect().width }; });
+ok('docx: bullets are real characters', await p.evaluate(() => !/[\uE000-\uF8FF]/.test([...document.querySelectorAll('#viewer style')].map(x => x.textContent).join(''))));
+ok('docx: real page with formatting (colour, bold, table, picture)', /Quarterly report/.test(dx.text) && dx.red === 'rgb(192, 32, 32)' && dx.bold >= 600 && dx.rows === 3 && dx.imgs >= 1, JSON.stringify(dx));
 await p.screenshot({ path: `${SHOTS}/d4-docx.png` });
-await open('budget.xlsx'); await p.waitForSelector('#viewer table.grid');
-ok('xlsx: first sheet as a table (shared strings + numbers)', (await p.locator('#viewer td').allInnerTexts()).join('|').includes('Coffee') && (await p.locator('#viewer td').allInnerTexts()).includes('42.5'));
+await open('budget.xlsx'); await p.waitForSelector('#viewer table.xl');
+const xl = await p.evaluate(() => { const t = document.querySelector('#viewer table.xl'), td = [...t.querySelectorAll('td')], by = s => td.find(x => x.textContent === s); const head = by('Item'); const hs = getComputedStyle(head); return { head: [hs.backgroundColor, hs.color, hs.fontWeight, hs.textAlign], dollars: !!by('$4.50'), date: !!by('2025-03-14'), pct: !!by('25.6%'), total: getComputedStyle(by('60')).backgroundColor, merged: by('Merged note across four columns')?.colSpan, colA: t.querySelector('col:nth-child(2)').style.width, letters: [...t.querySelectorAll('thead th')].map(x => x.textContent).slice(0, 5).join('') }; });
+ok('xlsx: fills, fonts, merges, widths and number formats are kept', xl.head[0] === 'rgb(31, 78, 120)' && xl.head[1] === 'rgb(255, 255, 255)' && +xl.head[2] >= 600 && xl.head[3] === 'center' && xl.dollars && xl.date && xl.pct && xl.total === 'rgb(255, 230, 153)' && xl.merged === 4 && xl.colA === '173px' && xl.letters === 'ABCD', JSON.stringify(xl));
+await p.screenshot({ path: `${SHOTS}/d4b-xlsx.png` });
 await p.click('#viewer .tabs button:text-is("Second")'); await p.waitForFunction(() => /Other sheet/.test(document.querySelector('#viewer').innerText));
 ok('xlsx: sheet tabs work', true);
-await open('deck.pptx'); await p.waitForSelector('#viewer .slide');
-ok('pptx: slide text', await p.locator('#viewer .slide').count() === 2 && /Launch plan/.test(await p.locator('#viewer .slide').first().innerText()));
+await open('deck.pptx'); await p.waitForFunction(() => /Launch plan/.test(document.querySelector('#viewer')?.innerText || ''), null, { timeout: 15000 });
+await p.waitForTimeout(500);
+const px = await p.evaluate(() => { const v = document.querySelector('#viewer .pptxview'); return { text: v.innerText, imgs: v.querySelectorAll('img').length, w: v.getBoundingClientRect().width, h: v.getBoundingClientRect().height }; });
+ok('pptx: slides rendered with their text, shapes and picture', /Launch plan/.test(px.text) && /Design/.test(px.text) && /Custom text box/.test(px.text) && px.imgs >= 1, JSON.stringify(px));
+await p.screenshot({ path: `${SHOTS}/d4c-pptx.png` });
+await open('doc.pdf'); await p.waitForSelector('#viewer .pdfpage canvas', { timeout: 20000 });
+await p.waitForFunction(() => /PDF fixture heading/.test(document.querySelector('#viewer .textLayer')?.textContent || ''), null, { timeout: 15000 });
+const pdf = await p.evaluate(() => { const cv = document.querySelector('#viewer .pdfpage canvas'), px = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data; let dark = 0, red = 0; for (let i = 0; i < px.length; i += 4) { if (px[i] < 80 && px[i + 1] < 80) dark++; if (px[i] > 180 && px[i + 1] < 60) red++; } return { pages: document.querySelectorAll('#viewer .pdfpage').length, dark, red }; });
+ok('pdf: pages drawn exactly (text, shapes) with a selectable text layer', pdf.pages === 2 && pdf.dark > 200 && pdf.red > 500, JSON.stringify(pdf));
+await p.screenshot({ path: `${SHOTS}/d4d-pdf.png` });
 await open('bundle.zip'); await p.waitForSelector('#viewer table.grid');
 ok('zip: file listing', (await p.locator('#viewer td').allInnerTexts()).includes('src/main.py'));
 await p.screenshot({ path: `${SHOTS}/d5-zip.png` });
@@ -106,10 +120,24 @@ await open('noext-table');
 await p.waitForFunction(() => document.querySelector('#ed').value.startsWith('plain text'));
 ok('extension-less text opens in the editor', true);
 ok('icons: table / code / json / slides / archive', await p.evaluate(() => ['data.csv', 'script.py', 'config.json', 'deck.pptx', 'bundle.zip'].every(n => !!([...document.querySelectorAll('.row .name')].find(x => x.textContent === n)?.previousElementSibling))));
+// ---- documents fit a phone screen without being reformatted ----
+const ph = await ctx.newPage(); await ph.setViewportSize({ width: 390, height: 800 });
+await ph.goto(URL0); await ph.waitForSelector('.row.file');
+const widths = {};
+for (const [n, sel] of [['report.docx', '#viewer section.docx'], ['doc.pdf', '#viewer .pdfpage canvas'], ['deck.pptx', '#viewer .pptxview']]) {
+  await ph.evaluate(() => document.body.classList.add('nav-open'));
+  await ph.click(`.row .name:text-is("${n}")`); await ph.waitForSelector(sel, { timeout: 20000 }); await ph.waitForTimeout(700);
+  widths[n] = await ph.evaluate(s => { const r = document.querySelector(s).getBoundingClientRect(); return { right: Math.round(r.right), w: Math.round(r.width), over: document.documentElement.scrollWidth > innerWidth }; }, sel);
+}
+ok('phone: docx, pdf and pptx scale to the screen width', Object.values(widths).every(x => x.right <= 392 && !x.over && x.w > 250), JSON.stringify(widths));
+await ph.screenshot({ path: `${SHOTS}/d6-phone-pptx.png` });
+await ph.click('.row .name:text-is("report.docx")').catch(() => {});
+await ph.close();
+
 // ---- header stays centred for every kind of file, in every layout ----
 const off = () => p.evaluate(() => { const r = document.querySelector('.tb-c').getBoundingClientRect(), m = document.querySelector('#main').getBoundingClientRect(); return Math.abs(r.left + r.width / 2 - (m.left + m.width / 2)); });
 const bad = [];
-for (const n of ['data.csv', 'config.json', 'script.py', 'page.html', 'Guide', 'report.docx', 'budget.xlsx', 'deck.pptx', 'bundle.zip', 'noext-table']) { await open(n); await p.waitForTimeout(150); if (await off() > 1.5) bad.push(n); }
+for (const n of ['data.csv', 'config.json', 'script.py', 'page.html', 'Guide', 'report.docx', 'budget.xlsx', 'deck.pptx', 'doc.pdf', 'bundle.zip', 'noext-table']) { await open(n); await p.waitForTimeout(150); if (await off() > 1.5) bad.push(n); }
 await p.fill('#title', 'A really very long note title that goes on and on and on and on and on forever and ever'); await p.waitForTimeout(100);
 if (await off() > 1.5) bad.push('long title');
 await p.keyboard.press('Escape');
