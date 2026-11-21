@@ -78,8 +78,8 @@ function palettes(seeds, vibrance) {
     primary: { h: base.h, C: pc },
     secondary: mk(s, base.h, pc * .34),
     tertiary: mk(t, base.h + 1.05, pc * .55),
-    neutral: { h: base.h, C: mono ? 0 : .007 * Math.min(k, 1.3) },
-    variant: { h: base.h, C: mono ? 0 : .014 * Math.min(k, 1.3) },
+    neutral: { h: base.h, C: mono ? 0 : .012 * Math.min(k, 1.3) },
+    variant: { h: base.h, C: mono ? 0 : .02 * Math.min(k, 1.3) },
     error: { h: 0.45, C: .19 },
   };
 }
@@ -100,7 +100,7 @@ export function scheme(seeds, vibrance, mode) {
   const P = palettes(seeds, vibrance), dark = mode !== 'light', out = {};
   for (const [role, [pal, l, d]] of Object.entries(ROLES)) {
     const t = dark ? (mode === 'black' && role in BLACK ? BLACK[role] : d) : l, q = P[pal];
-    out['--' + role] = tone(role === 'primary' || role.startsWith('on-') && t > 15 && t < 85 ? q : { h: q.h, C: q.C * (t >= 85 ? .5 : t <= 32 && t > 0 ? .8 : 1) }, t);   // pale/deep containers are softer than the key colour
+    out['--' + role] = tone(role === 'primary' || role.startsWith('on-') && t > 15 && t < 85 ? q : { h: q.h, C: q.C * (t >= 85 ? .8 : t <= 32 && t > 0 ? .9 : 1) }, t);   // pale/deep containers are softer than the key colour
   }
   out['--scrim'] = '#000'; out['--warn'] = dark ? '#f5b84a' : '#9a6700'; out['--ok'] = dark ? '#6dd58c' : '#1b7f3c';
   return out;

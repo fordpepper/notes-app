@@ -249,6 +249,7 @@ await m.tap('#toast button');
 await m.waitForSelector('.row .name:text-is("Brand new")');
 
 ok('no horizontal overflow on phone', await m.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+await m.locator('.row').first().waitFor({ state: 'visible' });
 ok('touch rows are finger-sized', (await m.locator('.row').first().boundingBox()).height >= 44);
 await m.tap('.row.folder:has-text("Projects")'); await m.tap('.row .name:text-is("todo")');
 await m.tap('#modes button[title=Preview]'); await m.waitForSelector('#preview h1');
