@@ -135,23 +135,25 @@ await page.click('#toast button');
 await page.waitForSelector('.row .name:text-is("Ideas")');
 ok('Undo brings it back', true);
 
-// accent colour drives the whole UI: logo, favicon, controls
-const stop = () => page.evaluate(() => getComputedStyle(document.querySelector('#lg stop')).stopColor);
-const logoBefore = await stop(), favBefore = await page.evaluate(() => decodeURIComponent(document.querySelector('link[rel=icon]').href));
+// the colour palette drives the whole UI: logo, favicon, controls
+const prim = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--primary').trim());
+const primBefore = await prim(), favBefore = await page.evaluate(() => decodeURIComponent(document.querySelector('link[rel=icon]').href));
 await page.click('#btnSettings');
-await page.click('.swatches button[aria-label="#e0457b"]');
-const accent = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim());
-ok('accent variable updated', accent === '#e0457b');
-ok('logo gradient follows the accent', (await stop()) !== logoBefore);
-ok('favicon follows the accent', (await page.evaluate(() => decodeURIComponent(document.querySelector('link[rel=icon]').href))).includes('#e0457b') && !favBefore.includes('#e0457b'));
+await page.click('.pal[data-id="rose"]');
+const primAfter = await prim();
+ok('palette changes the primary colour', primAfter !== primBefore && /^#[0-9a-f]{6}$/.test(primAfter));
+ok('tonal colours follow too', await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--secondary-container').trim()) !== '');
+ok('favicon follows the palette', (await page.evaluate(() => decodeURIComponent(document.querySelector('link[rel=icon]').href))).includes(primAfter) && !favBefore.includes(primAfter));
 await page.screenshot({ path: `${SHOTS}/3-settings-rose.png` });
-await page.selectOption('dialog select >> nth=0', 'black');
+await page.click('.chip:text-is("Black")');
 ok('black theme applies', await page.evaluate(() => getComputedStyle(document.body).backgroundColor) === 'rgb(0, 0, 0)');
+await page.click('.switch[data-part="stats"]');
+ok('word count can be hidden', await page.evaluate(() => getComputedStyle(document.querySelector('#stats')).display) === 'none');
+await page.click('.switch[data-part="stats"]');
 await page.click('dialog button:has-text("Close")');
 await page.reload(); await page.waitForSelector('.row');
-ok('appearance persisted across reload', await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()) === '#e0457b');
-await page.selectOption ? null : null;
-await page.click('#btnSettings'); await page.selectOption('dialog select >> nth=0', 'auto'); await page.click('.swatches button[aria-label="#0e8f7e"]'); await page.click('dialog button:has-text("Close")');
+ok('appearance persisted across reload', await page.evaluate(() => document.documentElement.dataset.theme === 'black' && JSON.parse(localStorage.prefs).palette === 'rose'));
+await page.click('#btnSettings'); await page.click('.chip:text-is("Match system")'); await page.click('.pal[data-id="teal"]'); await page.click('dialog button:has-text("Close")');
 
 // push
 await page.click('#btnSync'); await idle(page);

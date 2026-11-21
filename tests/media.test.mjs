@@ -83,7 +83,7 @@ await page.click('.row .name:text-is("beach")');
 await page.waitForSelector('#viewer img');
 await page.waitForFunction(() => document.querySelector('#viewer img').naturalWidth > 0);
 ok('extension-less file opens as a picture in the viewer', (await page.evaluate(() => document.querySelector('#viewer img').naturalWidth)) <= 1280);
-ok('its tree icon is a picture icon', await page.locator('.row.file:has(.name:text-is("beach")) svg.fi path[d^="m21 15"]').count() === 1);
+ok('its tree icon is a picture icon', await page.locator('.row.file:has(.name:text-is("beach")) svg.fi path[d^="M21 19V5"]').count() === 1);
 await page.click('.row .name:text-is("notes-file")');
 await page.waitForFunction(() => document.querySelector('#ed').value.startsWith('just some text'));
 ok('extension-less text file opens in the editor', await page.locator('#ed').isVisible());

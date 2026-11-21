@@ -9,13 +9,14 @@ import { icon } from './icons.js';
 import { promptText, confirmBox, pickFolder, showMenu, hideMenu } from './dialogs.js';
 import { prefs, applyPrefs } from './theme.js';
 import { openSettings } from './settings.js';
+import './ripple.js';
 
 const MAX_FILE = 25 * 1024 * 1024;   // keep uploads phone- and API-friendly
 
 /* ---------------------------------------------------------------- state */
 const S = {
   current: null, dir: '', q: '', kind: null, shownSha: null,
-  mode: ls.get('mode', 'split'),
+  mode: ls.get('mode', 'split'), altMode: 'preview',     // view mode for markdown / for other previewable text (csv, json, code…)
   expanded: new Set(ls.get('expanded', [])),
   fresh: null,                       // path of a just-created, still-untouched note (discarded if left empty)
 };
@@ -40,7 +41,7 @@ function closeNav() {
 const saveExpanded = () => ls.set('expanded', [...S.expanded]);
 function expandTo(dir) { let p = ''; for (const s of dir.split('/').filter(Boolean)) { p = U.join(p, s); S.expanded.add(p); } saveExpanded(); }
 const displayName = p => U.isNote(p) ? U.stem(p) : U.basename(p);
-const fileIcon = p => U.kindOf(p, M.files.get(p)) === 'image' ? 'image' : U.isNote(p) ? 'note' : 'file';
+const fileIcon = p => U.iconOf(p, M.files.get(p));
 
 function fileMenu(path) {
   const pinned = M.getPins().includes(path);
@@ -184,7 +185,7 @@ async function openFile(path) {
   await flush();
   if (!M.exists(path)) return;
   await discardFresh(path);
-  S.current = path; S.dir = U.dirname(path);
+  S.current = path; S.dir = U.dirname(path); S.altMode = 'preview';   // csv/json/code open as a preview; Edit is one tap away
   ls.set('last', path);
   expandTo(S.dir);
   await showFile(path);
@@ -360,8 +361,8 @@ function syncHeader() {
   $('#crumb').textContent = U.dirname(p).split('/').filter(Boolean).join('  ›  ') || 'Notes';
   const pinned = M.getPins().includes(p), pb = $('#btnPin');
   pb.classList.toggle('on', pinned); pb.title = pinned ? 'Unpin' : 'Pin to top'; pb.setAttribute('aria-label', pb.title); pb.hidden = !note;
-  pb.firstChild.style.fill = pinned ? 'currentColor' : 'none';
-  $('#modes').hidden = !U.isMarkdown(p);
+  pb.replaceChildren(icon(pinned ? 'star' : 'starO'));
+  $('#modes').hidden = !U.previewOf(p);
 }
 titleEl.addEventListener('keydown', e => {
   if (e.key === 'Enter') { e.preventDefault(); (S.kind === 'text' ? ed : titleEl).focus(); }
@@ -377,8 +378,14 @@ titleEl.addEventListener('change', async () => {
 });
 
 function effMode() {
-  if (!S.current || !U.isMarkdown(S.current)) return 'edit';
-  return S.mode === 'split' && !wide.matches ? 'edit' : S.mode;
+  const t = S.current && U.previewOf(S.current);
+  if (!t) return 'edit';
+  const m = t === 'md' ? S.mode : S.altMode;
+  return m === 'split' && !wide.matches ? (t === 'md' ? 'edit' : 'preview') : m;
+}
+function setMode(id) {
+  if (U.previewOf(S.current) === 'md') { S.mode = id; ls.set('mode', id); } else S.altMode = id;
+  applyMode(); if (id === 'edit') ed.focus();
 }
 function applyMode() {
   const m = effMode();
@@ -386,26 +393,38 @@ function applyMode() {
   const all = [['edit', 'pencil', 'Edit'], ...(wide.matches ? [['split', 'columns', 'Split']] : []), ['preview', 'eye', 'Preview']];
   const modes = narrow.matches ? all.filter(x => x[0] !== m) : all;     // phones: one button that flips to the other view
   $('#modes').classList.toggle('single', narrow.matches);
-  $('#modes').replaceChildren(...modes.map(([id, ic, label]) => h('button', { class: id === m ? 'on' : '', title: label, 'aria-label': label, 'aria-pressed': String(id === m), onclick: () => { S.mode = id; ls.set('mode', id); applyMode(); if (id === 'edit') ed.focus(); } }, icon(ic), h('span', {}, label))));
+  $('#modes').replaceChildren(...modes.map(([id, ic, label]) => h('button', { class: id === m ? 'on' : '', title: label, 'aria-label': label, 'aria-pressed': String(id === m), onclick: () => setMode(id) }, icon(ic), h('span', {}, label))));
   if (m !== 'edit') renderPreview();
   $('#toolbar').hidden = !(U.isNote(S.current || '') && m !== 'preview');
 }
 wide.addEventListener('change', () => S.kind === 'text' && applyMode());
 narrow.addEventListener('change', () => S.kind === 'text' && applyMode());
 
+function fileCard(path, r) {
+  return h('div', { class: 'filecard' }, h('div', { class: 'badge' }, icon(U.iconOf(path, r))), h('b', {}, U.basename(path)), h('span', {}, `${U.labelOf(path)} · ${fmtSize(r?.content?.size ?? 0)}`));
+}
 async function renderViewer(path, k) {
   const v = $('#viewer');
   v.replaceChildren(h('div', { class: 'filecard' }, 'Loading…'));
-  const acts = h('div', { class: 'viewer-actions' }, h('button', { class: 'ghost', onclick: () => downloadFile(path) }, icon('download'), 'Download'));
+  const acts = h('div', { class: 'viewer-actions' }, h('button', { class: 'tonal', onclick: () => downloadFile(path) }, icon('download'), 'Download'));
   try {
     const r = M.files.get(path);
+    if (k === 'font' || k === 'office' || k === 'archive') {            // rich previews, built in docs.js
+      const box = h('div', { class: 'docview' });
+      const blob = await M.getBlob(path);
+      if (S.current !== path) return;
+      v.replaceChildren(box, acts);
+      try { await (await import('./docs.js')).renderBinary(box, k, path, blob); }
+      catch (e) { console.warn(e); v.replaceChildren(fileCard(path, M.files.get(path)), acts); }
+      return;
+    }
+    if (k === 'other' || k === 'text') { await M.ensureContent(path); if (S.current !== path) return; v.replaceChildren(fileCard(path, M.files.get(path)), acts); return; }
     const url = k === 'image' ? await T.display(path) : await P.blobUrl(path);       // pictures: scaled-down version first
     if (S.current !== path) return;                                  // user moved on while it loaded
     if (k === 'image') v.replaceChildren(h('img', { src: url, alt: U.basename(path), 'data-path': path, decoding: 'async' }), acts);
     else if (k === 'video') v.replaceChildren(h('video', { src: url, controls: true }), acts);
     else if (k === 'audio') v.replaceChildren(h('audio', { src: url, controls: true }), acts);
-    else if (k === 'pdf') { acts.append(h('a', { class: 'ghost', href: url, target: '_blank', rel: 'noopener' }, 'Open in new tab')); v.replaceChildren(h('iframe', { src: url, title: U.basename(path) }), acts); }
-    else v.replaceChildren(h('div', { class: 'filecard' }, icon('file'), h('div', {}, U.basename(path)), h('small', {}, fmtSize(r.content?.size ?? 0))), acts);
+    else if (k === 'pdf') { acts.append(h('a', { class: 'ghost', href: url, target: '_blank', rel: 'noopener' }, icon('open'), 'Open in new tab')); v.replaceChildren(h('iframe', { src: url, title: U.basename(path) }), acts); }
   } catch (e) {
     v.replaceChildren(h('div', { class: 'filecard' }, G.configured() ? 'Could not load this file: ' + e.message : 'This file isn’t on this device yet. Connect GitHub to download it.'));
   }
@@ -429,9 +448,10 @@ function updateStats() {
 }
 E.bindKeys(ed, () => S.current);
 
+function pickAttach() { const inp = $('#filePick'); inp.value = ''; inp.onchange = () => attach([...inp.files]); inp.click(); }
 function buildToolbar() {
   const b = (ic, title, run) => h('button', { class: 'icon', title, 'aria-label': title, onmousedown: e => e.preventDefault(), onclick: run }, icon(ic));
-  const attachBtn = b('clip', 'Attach file or photo', () => { const inp = $('#filePick'); inp.value = ''; inp.onchange = () => attach([...inp.files]); inp.click(); });
+  const attachBtn = b('clip', 'Attach file or photo', pickAttach);
   if (!U.isMarkdown(S.current)) { $('#toolbar').replaceChildren(attachBtn); return; }
   $('#toolbar').replaceChildren(
     b('bold', 'Bold (Ctrl+B)', () => E.wrap(ed, '**', '**', 'bold')), b('italic', 'Italic (Ctrl+I)', () => E.wrap(ed, '*', '*', 'italic')),
@@ -477,7 +497,7 @@ document.addEventListener('click', e => {
 
 /* ---------------------------------------------------------------- markdown preview */
 function renderPreview() {
-  if (!S.current || !U.isMarkdown(S.current)) return;
+  if (!S.current || !U.previewOf(S.current)) return;
   return P.render(preview, ed.value, S.current).catch(e => { console.error(e); preview.textContent = 'Preview unavailable. It needs to load once while online.'; });
 }
 preview.addEventListener('change', e => {
@@ -538,7 +558,7 @@ function renderStatus() {
   else if (st.state === 'offline') { s = 'pending'; text = `Offline${n ? ` · ${n} change${n > 1 ? 's' : ''} waiting` : ''}`; }
   else if (n) { s = 'pending'; text = `${n} change${n > 1 ? 's' : ''} to sync`; }
   else text = st.at ? `Synced ${ago(st.at)}` : 'Up to date';
-  el.dataset.s = s; el.title = text; el.lastChild.textContent = text;
+  document.body.dataset.sync = s; el.dataset.s = s; el.title = text; el.lastChild.textContent = text;
   for (const b of [$('#btnSync'), $('#btnSync2')]) { b.classList.toggle('spin', st.state === 'syncing'); b.classList.toggle('pending', on && n > 0 && st.state !== 'syncing'); }
 }
 G.onStatus(() => { renderStatus(); if (G.status.state !== 'syncing') renderTree(); });
@@ -580,14 +600,24 @@ const settingsCtx = {
   onConnected: () => { renderStatus(); schedulePoll(); $('#emptyConnect').hidden = true; },
   onPollChanged: schedulePoll,
 };
-$('#btnMenu').addEventListener('click', openNav);
+function toggleFocus() {
+  const on = document.body.classList.toggle('focus');
+  if (!on) document.body.classList.remove('side-hidden');
+  toast(on ? 'Focus mode. Press Esc to leave.' : 'Back to normal');
+}
+$('#btnMenu').addEventListener('click', () => {
+  if (narrow.matches) return openNav();
+  if (document.body.classList.contains('focus')) return toggleFocus();
+  ls.set('side', document.body.classList.toggle('side-hidden'));      // desktop: collapse / expand the notes list
+});
+if (ls.get('side', false)) document.body.classList.add('side-hidden');
 $('#scrim').addEventListener('click', closeNav);
 addEventListener('keydown', e => {
   const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
-  if (e.key === 'Escape') { closeNav(); hideMenu(); }
+  if (e.key === 'Escape') { closeNav(); hideMenu(); if (document.body.classList.contains('focus')) toggleFocus(); }
   if (mod && k === 's') { e.preventDefault(); syncNow(); }
-  if (mod && k === 'e' && S.kind === 'text' && U.isMarkdown(S.current)) { e.preventDefault(); S.mode = effMode() === 'edit' ? (wide.matches ? 'split' : 'preview') : 'edit'; ls.set('mode', S.mode); applyMode(); }
-  if (mod && k === 'f' && !e.shiftKey && document.activeElement !== ed) { e.preventDefault(); openNav(); $('#q').focus(); }
+  if (mod && k === 'e' && S.kind === 'text' && U.previewOf(S.current)) { e.preventDefault(); setMode(effMode() === 'edit' ? (wide.matches ? 'split' : 'preview') : 'edit'); }
+  if (mod && k === 'f' && !e.shiftKey && document.activeElement !== ed) { e.preventDefault(); document.body.classList.remove('side-hidden', 'focus'); openNav(); $('#q').focus(); }
 });
 
 /* ---------------------------------------------------------------- launch intents (share sheet, shortcut) */
@@ -627,7 +657,7 @@ async function boot() {
   ic('#btnSync', icon('sync')); ic('#btnSync2', icon('sync')); ic('#btnSettings', icon('gear'));
   ic('#searchIcon', icon('search')); ic('#btnMenu', icon('menu'));
   ic('#btnNote', icon('compose')); ic('#btnFolder', icon('folderPlus')); ic('#btnUpload', icon('upload'));
-  ic('#btnPin', icon('star')); ic('#btnMore', icon('more')); ic('#emptyNew', icon('plus'), 'New note');
+  ic('#btnPin', icon('starO')); ic('#btnMore', icon('more')); ic('#emptyNew', icon('plus'), 'New note');
   applyPrefs();
   bindPullToRefresh(treeEl, $('#ptr'), () => G.configured() ? G.sync({ force: true }) : openSettings(true, settingsCtx));
 
@@ -640,7 +670,14 @@ async function boot() {
   $('#btnFolder').onclick = () => newFolder();
   $('#btnUpload').onclick = () => pickUpload();
   $('#btnPin').onclick = () => S.current && togglePin(S.current);
-  $('#btnMore').onclick = e => { const b = e.currentTarget.getBoundingClientRect(); if (S.current) showMenu(fileMenu(S.current), b.right, b.bottom + 4, true); };
+  $('#btnMore').onclick = e => {
+    const b = e.currentTarget.getBoundingClientRect(), p = S.current;
+    if (!p) return;
+    showMenu([
+      S.kind === 'text' && U.isNote(p) && { icon: 'clip', label: 'Attach file', run: pickAttach },
+      { icon: 'focus', label: document.body.classList.contains('focus') ? 'Exit focus mode' : 'Focus mode', run: toggleFocus },
+      '-', ...fileMenu(p)].filter(Boolean), b.right, b.bottom + 4, true);
+  };
   $('#q').addEventListener('input', debounce(e => { S.q = e.target.value.trim(); renderTree(); }, 120));
   $('#q').addEventListener('keydown', e => { if (e.key === 'Escape') { e.target.value = ''; S.q = ''; renderTree(); } });
 

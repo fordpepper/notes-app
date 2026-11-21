@@ -6,6 +6,8 @@ app on Android, Windows, Linux and ChromeOS. Offline-first, no backend: the app 
 **Features**
 - **Sync** with a private repo: pull + one commit per push, conflict-safe, works offline and catches up later.
 - **Folders**: create, rename, move (drag & drop, or *Move to…* on touch), delete with **Undo**. Your repo layout is shown as-is.
+- **Material Design 3** look with colour *palettes* (11 presets or your own primary/secondary/accent colours, muted–vivid), light/dark/black, and variables for note width, corners, list density, font, text size and line spacing. Every part of the UI (search, folder/upload buttons, icons, sync text, word count, formatting bar, the notes list itself) can be hidden; plus a focus mode.
+- **Previews**: markdown, CSV/TSV tables, JSON trees, syntax-highlighted code, HTML (sandboxed), Word/Excel/PowerPoint/OpenDocument, zip archives, fonts, PDF, audio, video and pictures.
 - **Files**: upload anything, attach files to notes (paste/drag them in), images/PDF/audio/video open in-app. Pictures are recognised by their content, so they display even without a `.png`/`.jpg` ending.
 - **Editor**: plain text with list continuation, pins, search. `.md` files in the repo still open with a toolbar and live preview.
 - **Phone**: sync button in the top bar, pull-down-to-refresh on the list, auto-sync when you open or leave the app,

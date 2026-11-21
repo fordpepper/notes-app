@@ -32,7 +32,13 @@ const watch = (el, p) => io ? io.observe(el) : load(el, p);
 let seq = 0;
 /** Render markdown `src` (belonging to note `path`) into `box`. */
 export async function render(box, src, path) {
-  const id = ++seq;
+  const id = ++seq, type = U.previewOf(path);
+  box.className = type === 'md' ? 'md' : 'pv ' + type;
+  if (type !== 'md') {                                       // csv / json / html / code: handled by docs.js (loaded on demand)
+    const D = await import('./docs.js');
+    if (id === seq) D.renderText(box, src, path, type);
+    return;
+  }
   const { marked, DOMPurify } = await loadLibs();
   if (id !== seq) return;                                  // a newer render superseded this one
   const text = src.replace(/\[\[([^\]\n|]+)(?:\|([^\]\n]+))?\]\]/g, (_, n, a) => `[${a || n}](#wiki/${encodeURIComponent(n.trim())})`);
@@ -61,6 +67,8 @@ export async function render(box, src, path) {
     const known = peek(p);
     if (known) el.src = known; else watch(el, p);            // pictures load (scaled down) when they come into view
   }
+  const blocks = [...box.querySelectorAll('pre > code')];
+  if (blocks.length) import('./docs.js').then(D => { for (const c of blocks) { const lang = /language-([\w+-]+)/.exec(c.className)?.[1] || ''; if (c.isConnected) c.innerHTML = D.highlight(c.textContent, lang); } });
   box.querySelectorAll('input[type=checkbox]').forEach((c, i) => { c.disabled = false; c.dataset.i = i; });
 }
 
