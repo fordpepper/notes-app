@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<title>Notes</title>
+<meta name="theme-color" content="#fbfbf9">
+<meta name="description" content="Plain-text notes that sync with a private GitHub repo">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <header class="side-head">
+      <div class="brand"><img src="icons/icon.svg" alt="" width="22" height="22"><span>Notes</span></div>
+      <button id="btnSync" class="icon" title="Sync now (Ctrl+S)"></button>
+      <button id="btnSettings" class="icon" title="Settings"></button>
+    </header>
+    <div class="search"><span id="searchIcon"></span><input id="q" type="search" placeholder="Search notes…" autocomplete="off"></div>
+    <div class="actions">
+      <button id="btnNote" class="primary"></button>
+      <button id="btnFolder" class="ghost" title="New folder"></button>
+      <button id="btnUpload" class="ghost" title="Upload files"></button>
+    </div>
+    <nav id="tree" aria-label="Notes"></nav>
+    <footer id="status" role="button" tabindex="0" title="Sync now"><i class="dot"></i><span></span></footer>
+  </aside>
+  <div id="scrim"></div>
+  <main id="main">
+    <div id="topbar">
+      <button id="btnMenu" class="icon" title="Notes"></button>
+      <div id="crumb"></div>
+      <div id="modes" class="seg"></div>
+      <button id="btnPin" class="icon" title="Pin"></button>
+      <button id="btnMore" class="icon" title="More"></button>
+    </div>
+    <div id="doc">
+      <div id="titlebar"><input id="title" spellcheck="false" autocomplete="off" aria-label="Note title"><span id="titleExt"></span></div>
+      <div id="pane" data-mode="edit">
+        <textarea id="ed" spellcheck="true" placeholder="Start writing…"></textarea>
+        <article id="preview" class="md"></article>
+        <div id="viewer"></div>
+      </div>
+      <div id="toolbar"></div>
+      <div id="stats"></div>
+    </div>
+    <div id="empty">
+      <div class="empty-card">
+        <img src="icons/icon.svg" alt="" width="64" height="64">
+        <h2>Your notes</h2>
+        <p id="emptyMsg">Pick a note from the sidebar, or start a new one.</p>
+        <div class="row-btns"><button id="emptyNew" class="primary"></button><button id="emptyConnect" class="ghost">Connect GitHub</button></div>
+      </div>
+    </div>
+  </main>
+</div>
+<div id="menu" role="menu"></div>
+<div id="toast" role="status"></div>
+<input type="file" id="filePick" multiple hidden>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
