@@ -4,7 +4,7 @@
 import { ls } from './dom.js';
 import { dkey, tkey, parseKey } from './ics.js';
 
-const API = 'https://www.googleapis.com/calendar/v3', SCOPE = 'https://www.googleapis.com/auth/calendar';
+const API = 'https://www.googleapis.com/calendar/v3', SCOPE = 'https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/calendar.events';
 const KEY = 'gcal', CACHE = 'gcal-cache';
 
 function read() {
