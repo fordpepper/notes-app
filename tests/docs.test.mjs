@@ -194,7 +194,7 @@ ok('top bar title is centred for every file type', bad.length === 0, bad.join(',
 // ---- settings stay small; collapse the list, focus mode ----
 await open('Guide');
 await openMenu(p, 'Settings');
-ok('settings are short: theme, size, font, files, sync interval (+ accent)', await p.locator('dialog .chips').count() === 6 && await p.locator('dialog .switch').count() === 0);
+ok('settings are short: theme, size, hidden files, files, sync interval (+ accent); no font choice', await p.locator('dialog .chips').count() === 5 && await p.locator('dialog .switch').count() === 0 && !/Serif|Mono/.test(await p.locator('dialog').innerText()));
 const before = await p.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--primary').trim());
 await p.locator('.pal.custom input').fill('#d81b60');
 ok('custom accent colour', await p.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--primary').trim()) !== before);

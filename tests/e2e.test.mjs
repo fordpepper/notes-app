@@ -112,7 +112,7 @@ ok('an untouched new note is discarded when you leave it', await page.locator('.
 await openMenu(page, 'New folder'); await page.fill('dialog input', 'Archive'); await page.keyboard.press('Enter');
 await page.waitForSelector('.row.folder:has-text("Archive")');
 await page.click('.row .name:text-is("Meeting notes")');
-await page.click('.row.file.active .more', { force: true });
+await page.waitForSelector('.row.file.active .more'); await page.click('.row.file.active .more');
 await page.click('#menu button:has-text("Move to")');
 await page.click('.folderlist button:has-text("Archive")');
 await page.waitForTimeout(250);

@@ -18,7 +18,6 @@ export const PALETTES = {
 };
 export const VIBRANCE = [['muted', 'Muted', .55], ['normal', 'Balanced', 1], ['vivid', 'Vivid', 1.3]];
 export const WIDTHS = [['narrow', 'Narrow', 600], ['normal', 'Comfortable', 680], ['wide', 'Wide', 960], ['full', 'Full', 99999]];
-export const FONTS = [['sans', 'Sans'], ['serif', 'Serif'], ['mono', 'Mono']];
 export const SPACING = [['tight', 'Tight', 1.42], ['normal', 'Normal', 1.6], ['relaxed', 'Relaxed', 1.82]];
 export const SHAPES = [['sharp', 'Sharp', .45], ['normal', 'Rounded', 1], ['soft', 'Extra round', 1.6]];
 export const DENSITY = [['comfortable', 'Comfortable'], ['compact', 'Compact']];
@@ -28,7 +27,7 @@ export const PARTS = [
   ['status', 'Sync status text'], ['stats', 'Word count'], ['toolbar', 'Formatting bar'],
 ];
 
-const DEFAULTS = { theme: 'auto', palette: 'teal', seeds: ['#0e8f7e', '', ''], vibrance: 'normal', width: 'normal', font: 'sans', spacing: 'normal', shape: 'normal', density: 'comfortable', size: 17, poll: 120, files: 'smart', hidden: true, hide: [] };
+const DEFAULTS = { theme: 'auto', palette: 'teal', seeds: ['#0e8f7e', '', ''], vibrance: 'normal', width: 'normal', spacing: 'normal', shape: 'normal', density: 'comfortable', size: 17, poll: 120, files: 'smart', hidden: true, hide: [] };
 export const prefs = { ...DEFAULTS, ...ls.get('prefs', {}) };
 // migrations: v1 purple default, v2 single accent colour -> palettes, v3 text sizes
 if (!prefs.v) { if (prefs.accent === '#6d5ae6') prefs.accent = '#0e8f7e'; prefs.v = 2; }
@@ -126,9 +125,8 @@ export function swatch(seeds, vibrance = 'normal') {
 
 function layoutVars() {
   const pick = (list, v) => list.find(x => x[0] === v) || list[1] || list[0];
-  const fonts = { sans: 'var(--font)', serif: 'Charter, "Iowan Old Style", Georgia, "Noto Serif", serif', mono: 'var(--mono)' };
   return {
-    '--content-w': pick(WIDTHS, prefs.width)[2] + 'px', '--ed-font': fonts[prefs.font] || fonts.sans, '--ed-lh': pick(SPACING, prefs.spacing)[2],
+    '--content-w': pick(WIDTHS, prefs.width)[2] + 'px', '--ed-font': 'var(--font)', '--ed-lh': pick(SPACING, prefs.spacing)[2],
     '--shape': pick(SHAPES, prefs.shape)[2], '--ed-size': prefs.size + 'px', '--row-h': prefs.density === 'compact' ? '30px' : '36px',
   };
 }

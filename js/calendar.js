@@ -1,5 +1,6 @@
-// Calendar view: a month grid with a day list. Events live in `calendar.ics` in the notes repo (synced like any note);
-// Google Calendar events are shown and edited too when an account is connected (optional).
+// Calendar view: one continuous, vertically scrolling stretch of weeks (like Apple Calendar), with the chosen day's
+// events underneath (phone) or beside (desktop). Events live in `calendar.ics` in the notes repo and sync like any note.
+// Google Calendar events from any number of connected accounts are shown and edited too; accounts are added in Settings only.
 import * as M from './model.js';
 import * as I from './ics.js';
 import * as GC from './gcal.js';
@@ -8,66 +9,96 @@ import { icon } from './icons.js';
 import { modal, confirmBox } from './dialogs.js';
 
 export const FILE = 'calendar.ics';
-const pad = n => String(n).padStart(2, '0');
 const localEvents = () => { const r = M.files.get(FILE); return r && !r.deleted && typeof r.content === 'string' ? I.parseICS(r.content) : []; };
 async function saveLocal(events) { const text = I.toICS(events); M.exists(FILE) ? await M.saveText(FILE, text) : await M.create(FILE, text); }
+/** Adds the events of an .ics file (for instance exported from Apple Calendar) to calendar.ics. Same UID = same event. */
+export async function importEvents(text) {
+  const incoming = I.parseICS(text);
+  if (!incoming.length) throw new Error('No events found in that file.');
+  const list = localEvents(), ids = new Set(list.map(e => e.id));
+  const fresh = incoming.filter(e => !ids.has(e.id));
+  if (fresh.length) await saveLocal([...list, ...fresh]);
+  return { added: fresh.length, skipped: incoming.length - fresh.length };
+}
+
+const startOfDay = d => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
 const firstDay = () => { try { const l = new Intl.Locale(navigator.language), w = l.weekInfo || l.getWeekInfo?.(); return (w?.firstDay ?? 1) % 7; } catch { return 1; } };
-const sameDay = (a, b) => I.dkey(a) === I.dkey(b);
 const fmtTime = k => I.parseKey(k).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+const ym = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+const uid = () => 'e' + Math.random().toString(36).slice(2, 10);
+const BLOCK = 26, PHONE = matchMedia('(max-width: 640px)');
 
 export function initCalendar(root, { openSettings }) {
-  let month = new Date(); month.setDate(1); month.setHours(0, 0, 0, 0);
-  let selected = new Date(), open = false, gevents = [], gkey = '', loading = false, error = '';
+  const fd = firstDay(), today = startOfDay(new Date());
+  const weekStart = d => I.addDays(startOfDay(d), -((d.getDay() - fd + 7) % 7));
+  let open = false, sel = today, first, nWeeks, wk = 100, lastSha = '', loading = 0, error = '', renewed = false;
+  const byDay = new Map(), gdata = new Map(), loaded = new Map();
+  let titleEl, subEl, scroller, weeksEl, panel, wdEl, hh = 28, raf = 0, ensureT = 0;
 
-  const range = () => { const first = new Date(month), off = (first.getDay() - firstDay() + 7) % 7, start = I.addDays(first, -off); return { start, end: I.addDays(start, 42) }; };
-  const all = () => {
-    const { start, end } = range();
-    const local = localEvents().flatMap(e => I.occurrences(e, start, end));
-    const g = GC.connected() || GC.expired() ? gevents : [];
-    return [...local, ...g];
-  };
-  const onDay = (evs, day) => {
-    const k = I.dkey(day);
-    return evs.filter(e => { const s = e.start.slice(0, 10); let en = e.end.slice(0, 10); if (e.allDay || (e.end.slice(11) === '00:00' && en > s)) { en = I.dkey(I.addDays(I.parseKey(en), -1)); } return s <= k && k <= (en < s ? s : en); })
-      .sort((a, b) => (b.allDay - a.allDay) || a.start.localeCompare(b.start));
-  };
+  /* ---------------------------------------------------------------- data */
+  const activeG = key => { const [email, calId] = key.split('|'); return !!GC.account(email)?.calendars.some(c => c.id === calId && c.on); };
+  function gather() {
+    const from = first, to = I.addDays(first, nWeeks * 7), seen = new Set(), list = localEvents().flatMap(e => I.occurrences(e, from, to));
+    for (const [k, v] of gdata) if (activeG(k)) for (const e of v) { const id = `${e.acct}|${e.calId}|${e.id}|${e.start}`; if (!seen.has(id)) { seen.add(id); list.push(e); } }
+    byDay.clear();
+    for (const e of list) {
+      const s = e.start.slice(0, 10); let en = e.end.slice(0, 10);
+      if (e.allDay || (e.end.slice(11) === '00:00' && en > s)) en = I.dkey(I.addDays(I.parseKey(en), -1));
+      if (en < s) en = s;
+      for (let d = I.parseKey(s), n = 0; I.dkey(d) <= en && n < 400; d = I.addDays(d, 1), n++) { const k = I.dkey(d); (byDay.get(k) || byDay.set(k, []).get(k)).push(e); }
+    }
+    for (const l of byDay.values()) l.sort((a, b) => (b.allDay - a.allDay) || a.start.localeCompare(b.start));
+  }
+  const visibleRows = () => { const a = Math.max(0, Math.floor(scroller.scrollTop / wk)), b = Math.min(nWeeks - 1, Math.floor((scroller.scrollTop + scroller.clientHeight) / wk)); return [a, b]; };
 
-  async function loadGoogle() {
-    if (!GC.connected()) { gevents = GC.expired() ? gevents : []; error = GC.expired() ? 'Google session expired.' : ''; render(); return; }
-    const { start, end } = range(), cals = GC.state().calendars.filter(c => c.on), key = I.dkey(start);
-    gevents = cals.flatMap(c => GC.cachedEvents(c, start, end)); gkey = key; loading = true; error = ''; render();
-    try { gevents = (await Promise.all(cals.map(c => GC.events(c, start, end)))).flat(); }
-    catch (e) { error = e.message; }
-    loading = false; render();
+  async function ensure(force) {
+    if (!open || !scroller) return;
+    if (!renewed) { renewed = true; await Promise.all(GC.accounts().filter(a => !GC.live(a)).map(a => GC.renew(a.email))); }
+    const [a, b] = visibleRows(), months = new Map();
+    for (let i = a; i <= b; i++) for (const off of [0, 6]) { const d = I.addDays(first, i * 7 + off); months.set(ym(d), new Date(d.getFullYear(), d.getMonth(), 1)); }
+    const jobs = []; let cached = false;
+    for (const acct of GC.accounts().filter(GC.live)) for (const cal of acct.calendars.filter(c => c.on)) for (const [m, from] of months) {
+      const key = `${acct.email}|${cal.id}|${m}`, to = new Date(from.getFullYear(), from.getMonth() + 1, 1);
+      if (!gdata.has(key)) { const c = GC.cachedEvents(acct.email, cal, from, to); if (c.length) { gdata.set(key, c); cached = true; } }
+      if (!force && Date.now() - (loaded.get(key) || 0) < 120000) continue;
+      loaded.set(key, Date.now());
+      jobs.push(GC.events(acct.email, cal, from, to).then(v => { gdata.set(key, v); }, e => { loaded.delete(key); if (!e.expired) error = e.message; }));
+    }
+    if (cached) rebuild();
+    if (!jobs.length) { paintHead(); return; }
+    loading++; error = ''; paintHead();
+    await Promise.all(jobs); loading--;
+    rebuild();
   }
-  async function connectGoogle() {
-    try { await GC.connect(); await GC.refreshCalendars(); await loadGoogle(); } catch (e) { toast(e.message); }
-  }
+  const refetch = () => { loaded.clear(); gdata.clear(); error = ''; rebuild(); ensure(true); };
 
   /* ---------------------------------------------------------------- event editor */
   function editor(ev, day) {
     const isNew = !ev;
-    const now = new Date(day || selected); now.setHours(Math.max(8, new Date().getHours() + 1), 0, 0, 0);
-    const base = ev ? { ...ev } : { id: 'e' + Math.random().toString(36).slice(2, 10), title: '', allDay: false, start: I.tkey(now), end: I.tkey(new Date(now.getTime() + 3600000)), source: 'local', rrule: '' };
-    if (ev?.series) { const raw = localEvents().find(x => x.id === ev.id); if (raw) Object.assign(base, raw); }
-    const target = base.source === 'google' ? base.calId : 'local';
+    const at = new Date(day || sel); at.setHours(Math.max(8, new Date().getHours() + 1), 0, 0, 0);
+    const base = ev ? { ...ev } : { id: uid(), title: '', allDay: false, start: I.tkey(at), end: I.tkey(new Date(at.getTime() + 3600000)), source: 'local', rrule: '' };
+    if (ev?.series && ev.source === 'local') { const raw = localEvents().find(x => x.id === ev.id); if (raw) Object.assign(base, raw); }
+    const target = base.source === 'google' ? `${base.acct}|${base.calId}` : 'local';
     return modal((d, close) => {
       d.classList.add('evdlg');
-      const title = h('input', { value: base.title, placeholder: 'Title', autocomplete: 'off', 'aria-label': 'Title' });
-      const allDay = h('input', { type: 'checkbox', checked: !!base.allDay, class: 'cb' });
-      const sd = h('input', { type: 'date', value: base.start.slice(0, 10) }), st = h('input', { type: 'time', value: base.allDay ? '09:00' : base.start.slice(11, 16) });
-      // all-day end dates are stored exclusive; show them inclusive
-      const endIncl = base.allDay ? I.dkey(I.addDays(I.parseKey(base.end), -1)) : base.end.slice(0, 10);
-      const ed = h('input', { type: 'date', value: endIncl < base.start.slice(0, 10) ? base.start.slice(0, 10) : endIncl }), et = h('input', { type: 'time', value: base.allDay ? '10:00' : base.end.slice(11, 16) });
-      const where = h('input', { value: base.location || '', placeholder: 'Place', autocomplete: 'off' });
-      const notes = h('textarea', { rows: 3, placeholder: 'Notes' }); notes.value = base.notes || '';
+      const input = (props, ...k) => h('input', { autocomplete: 'off', ...props }, ...k);
+      const title = input({ class: 'evtitle', value: base.title, placeholder: 'Title', 'aria-label': 'Title', enterkeyhint: 'done' });
+      const allDay = input({ type: 'checkbox', checked: !!base.allDay, class: 'switch', 'aria-label': 'All day' });
+      const sd = input({ type: 'date', value: base.start.slice(0, 10), 'aria-label': 'Start date' }), st = input({ type: 'time', value: base.allDay ? '09:00' : base.start.slice(11, 16), 'aria-label': 'Start time' });
+      const endIncl = base.allDay ? I.dkey(I.addDays(I.parseKey(base.end), -1)) : base.end.slice(0, 10);       // all-day end dates are stored exclusive; shown inclusive
+      const ed = input({ type: 'date', value: endIncl < base.start.slice(0, 10) ? base.start.slice(0, 10) : endIncl, 'aria-label': 'End date' }), et = input({ type: 'time', value: base.allDay ? '10:00' : base.end.slice(11, 16), 'aria-label': 'End time' });
+      const where = input({ value: base.location || '', placeholder: 'Place', 'aria-label': 'Place' });
+      const notes = h('textarea', { rows: 2, placeholder: 'Notes', 'aria-label': 'Notes' }); notes.value = base.notes || '';
       const known = I.REPEATS.some(r => r[0] === (base.rrule || ''));
-      const rep = h('select', {}, ...I.REPEATS.map(([v, l]) => h('option', { value: v, selected: v === (base.rrule || '') }, l)), !known && h('option', { value: base.rrule, selected: true }, 'Custom (kept)'));
-      const cals = GC.connected() ? GC.state().calendars.filter(c => c.writable) : [];
-      const which = h('select', { disabled: !isNew }, h('option', { value: 'local', selected: target === 'local' }, 'Notes (calendar.ics)'), ...cals.map(c => h('option', { value: c.id, selected: target === c.id }, c.name)));
+      const rep = h('select', { 'aria-label': 'Repeat' }, ...I.REPEATS.map(([v, l]) => h('option', { value: v, selected: v === (base.rrule || '') }, l)), !known && h('option', { value: base.rrule, selected: true }, 'Custom (kept)'));
+      const multi = GC.accounts().filter(GC.live).length > 1;
+      const choices = GC.accounts().filter(GC.live).flatMap(a => a.calendars.filter(c => c.writable).map(c => [`${a.email}|${c.id}`, multi ? `${c.name} (${a.email})` : c.name]));
+      const which = h('select', { 'aria-label': 'Calendar', disabled: !isNew }, h('option', { value: 'local', selected: target === 'local' }, 'Notes'), ...choices.map(([v, l]) => h('option', { value: v, selected: target === v }, l)),
+        !isNew && target !== 'local' && !choices.some(c => c[0] === target) && h('option', { value: target, selected: true }, base.acct));
       const sync = () => { st.hidden = et.hidden = allDay.checked; };
       allDay.onchange = sync; sync();
       const err = h('div', { class: 'err', role: 'alert' });
+      const writable = base.writable !== false;
       const save = async e => {
         e?.preventDefault();
         const ad = allDay.checked, sk = ad ? sd.value : `${sd.value}T${st.value || '09:00'}`;
@@ -75,81 +106,156 @@ export function initCalendar(root, { openSettings }) {
         if (!sd.value) { err.textContent = 'Pick a start date.'; return; }
         if (ek < sk) ek = ad ? I.dkey(I.addDays(I.parseKey(sd.value), 1)) : sk;
         const next = { ...base, title: title.value.trim() || '(no title)', allDay: ad, start: sk, end: ek, location: where.value.trim(), notes: notes.value.trim(), rrule: rep.value };
+        const dest = isNew ? which.value : target;
         try {
-          if ((isNew ? which.value : target) === 'local') {
+          if (dest === 'local') {
             const list = localEvents(), i = list.findIndex(x => x.id === next.id);
             const rec = { ...next, source: 'local', extra: i >= 0 ? list[i].extra : [] };
             i >= 0 ? list[i] = rec : list.push(rec); await saveLocal(list);
-          } else if (isNew) { await GC.create(which.value, next); await loadGoogle(); }
-          else { await GC.update(next); await loadGoogle(); }
-          selected = I.parseKey(sk); if (selected.getMonth() !== month.getMonth() || selected.getFullYear() !== month.getFullYear()) { month = new Date(selected.getFullYear(), selected.getMonth(), 1); loadGoogle(); }
-          close(true); render();
-        } catch (ex) { err.textContent = ex.message; if (ex.expired) render(); }
+          } else if (isNew) { const [email, ...c] = dest.split('|'); await GC.create(email, c.join('|'), next); refetch(); }
+          else { await GC.update(next); refetch(); }
+          close(true); sel = startOfDay(I.parseKey(sk)); rebuild(); goTo(sel);
+        } catch (ex) { err.textContent = ex.message; }
       };
       const del = async () => {
         if (!await confirmBox({ title: 'Delete this event?', body: base.series || base.rrule ? 'This removes the whole repeating series.' : `“${base.title}” will be deleted.`, ok: 'Delete', danger: true })) return;
         try {
-          if (target === 'local') await saveLocal(localEvents().filter(x => x.id !== base.id)); else { await GC.remove(base); await loadGoogle(); }
-          close(true); render();
+          if (target === 'local') await saveLocal(localEvents().filter(x => x.id !== base.id)); else { await GC.remove(base); refetch(); }
+          close(true); rebuild();
         } catch (ex) { err.textContent = ex.message; }
       };
-      const writable = base.writable !== false;
-      d.append(h('form', { onsubmit: save },
-        h('div', { class: 'mbody' }, h('h3', {}, isNew ? 'New event' : 'Event'),
-          h('label', { class: 'field' }, 'Title', title),
-          h('label', { class: 'setting' }, 'All day', allDay),
-          h('div', { class: 'dtrow' }, h('label', { class: 'field' }, 'Starts', h('span', { class: 'dts' }, sd, st)), h('label', { class: 'field' }, 'Ends', h('span', { class: 'dts' }, ed, et))),
-          h('label', { class: 'field' }, 'Repeat', rep), h('label', { class: 'field' }, 'Place', where), h('label', { class: 'field' }, 'Notes', notes),
-          (cals.length || !isNew) && h('label', { class: 'field' }, 'Calendar', which), err),
-        h('div', { class: 'mfoot' }, !isNew && writable && h('button', { type: 'button', class: 'danger', style: 'margin-right:auto', onclick: del }, 'Delete'),
-          h('button', { type: 'button', class: 'text', onclick: () => close(null) }, 'Cancel'), writable && h('button', { class: 'primary' }, 'Save'))));
-      setTimeout(() => title.focus(), 30);
+      const row = (label, ...ctl) => h('label', { class: 'evrow' }, h('span', {}, label), ...ctl);
+      d.append(h('form', { class: 'evform', onsubmit: save },
+        h('header', { class: 'evbar' }, h('button', { type: 'button', class: 'text', onclick: () => close(null) }, 'Cancel'), h('h3', {}, isNew ? 'New event' : 'Event'), writable ? h('button', { class: 'text strong' }, 'Save') : h('span')),
+        h('div', { class: 'evbody' },
+          title,
+          h('div', { class: 'evgroup' },
+            row('All day', allDay), row('Starts', h('span', { class: 'when2' }, sd, st)), row('Ends', h('span', { class: 'when2' }, ed, et)),
+            row('Repeat', rep), (choices.length || !isNew) && row('Calendar', which)),
+          h('div', { class: 'evgroup' }, where, notes),
+          err, !isNew && writable && h('button', { type: 'button', class: 'evdel', onclick: del }, 'Delete event'))));
+      setTimeout(() => isNew && title.focus(), 30);
     });
   }
 
-  /* ---------------------------------------------------------------- view */
+  /* ---------------------------------------------------------------- rows */
+  const sameDay = (a, b) => I.dkey(a) === I.dkey(b);
   function chip(ev) {
     const c = ev.color || 'var(--primary)';
-    return h('button', { class: 'ce' + (ev.allDay ? ' ad' : ''), style: `--c:${c}`, title: `${ev.title}${ev.allDay ? '' : ' · ' + fmtTime(ev.start)}`, onclick: e => { e.stopPropagation(); editor(ev); } },
+    return h('button', { type: 'button', class: 'ce' + (ev.allDay ? ' ad' : ''), style: `--c:${c}`, tabindex: '-1', title: `${ev.title}${ev.allDay ? '' : ' · ' + fmtTime(ev.start)}`, onclick: e => { e.stopPropagation(); editor(ev); } },
       !ev.allDay && h('span', { class: 't' }, fmtTime(ev.start)), h('span', { class: 'n' }, ev.title));
   }
-  function render() {
-    if (!open) return;
-    const evs = all(), { start } = range(), fd = firstDay(), today = new Date();
-    const names = Array.from({ length: 7 }, (_, i) => I.addDays(new Date(2023, 0, 1 + fd + i), 0).toLocaleDateString(undefined, { weekday: 'short' }));
-    const cells = Array.from({ length: 42 }, (_, i) => {
-      const day = I.addDays(start, i), list = onDay(evs, day), more = list.length - 3;
-      return h('div', { class: 'cd' + (day.getMonth() !== month.getMonth() ? ' out' : '') + (sameDay(day, today) ? ' today' : '') + (sameDay(day, selected) ? ' sel' : ''), role: 'gridcell', tabindex: '0', 'aria-label': day.toDateString(),
-        onclick: () => { selected = day; render(); }, ondblclick: () => editor(null, day), onkeydown: e => { if (e.key === 'Enter') { selected = day; render(); } } },
-        h('span', { class: 'dn' }, day.getDate()), h('div', { class: 'cs' }, list.slice(0, 3).map(chip), more > 0 && h('span', { class: 'more' }, `+${more}`)));
-    });
-    const dayList = onDay(evs, selected);
-    const connectedG = GC.connected(), exp = GC.expired();
-    const head = h('div', { class: 'cal-head' },
-      h('h2', {}, month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })),
-      h('div', { class: 'cal-nav' },
-        h('button', { class: 'icon', 'aria-label': 'Previous month', onclick: () => { month = new Date(month.getFullYear(), month.getMonth() - 1, 1); loadGoogle(); render(); } }, icon('back')),
-        h('button', { class: 'text', onclick: () => { month = new Date(today.getFullYear(), today.getMonth(), 1); selected = today; loadGoogle(); render(); } }, 'Today'),
-        h('button', { class: 'icon', 'aria-label': 'Next month', style: 'transform:scaleX(-1)', onclick: () => { month = new Date(month.getFullYear(), month.getMonth() + 1, 1); loadGoogle(); render(); } }, icon('back'))),
-      h('button', { class: 'primary', onclick: () => editor(null, selected) }, icon('plus'), 'Event'));
-    const account = h('div', { class: 'cal-acct' },
-      connectedG ? h('span', { class: 'dim' }, loading ? 'Syncing Google Calendar…' : `Google Calendar${GC.state().name ? ' · ' + GC.state().name : ''}`)
-        : exp ? h('button', { class: 'text', onclick: connectGoogle }, 'Reconnect Google Calendar')
-        : h('button', { class: 'text', onclick: () => GC.hasClientId() ? connectGoogle() : openSettings() }, 'Connect Google Calendar (optional)'),
-      connectedG && h('button', { class: 'text', onclick: () => loadGoogle() }, 'Refresh'), error && h('span', { class: 'err' }, error));
-    const panel = h('aside', { class: 'cal-day' }, h('h3', {}, selected.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })),
-      dayList.length ? dayList.map(ev => h('button', { class: 'ev', style: `--c:${ev.color || 'var(--primary)'}`, onclick: () => editor(ev) },
-        h('span', { class: 'when' }, ev.allDay ? 'All day' : `${fmtTime(ev.start)}–${fmtTime(ev.end)}`), h('b', {}, ev.title), ev.location && h('small', {}, ev.location), ev.source === 'google' && h('small', { class: 'dim' }, 'Google'))) : h('p', { class: 'dim' }, 'Nothing planned.'),
-      h('button', { class: 'text', onclick: () => editor(null, selected) }, icon('plus'), 'Add event'));
-    root.replaceChildren(head, account, h('div', { class: 'cal-body' }, h('div', { class: 'cal-grid', role: 'grid' }, h('div', { class: 'wd' }, names.map(n => h('span', {}, n))), h('div', { class: 'cells' }, cells)), panel));
+  function cell(day) {
+    const k = I.dkey(day), list = byDay.get(k) || [], cap = PHONE.matches ? 4 : Math.max(1, Math.floor((wk - 30) / 19)), shown = list.length > cap ? cap - 1 : list.length;
+    const label = day.getDate() === 1 ? day.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : String(day.getDate());
+    return h('div', { class: 'cd' + (day.getMonth() % 2 ? ' odd' : '') + (sameDay(day, today) ? ' today' : '') + (sameDay(day, sel) ? ' sel' : ''), role: 'gridcell', 'data-k': k, 'aria-label': day.toDateString(), 'aria-selected': String(sameDay(day, sel)) },
+      h('span', { class: 'dn' }, label), h('div', { class: 'cs' }, list.slice(0, shown).map(chip), list.length > shown && h('span', { class: 'more' }, `${list.length - shown} more`)));
+  }
+  const weekRow = i => h('div', { class: 'wk', role: 'row' }, Array.from({ length: 7 }, (_, d) => cell(I.addDays(first, i * 7 + d))));
+
+  function rebuild() {
+    if (!open || !weeksEl) return;
+    gather();
+    weeksEl.replaceChildren(...Array.from({ length: nWeeks }, (_, i) => weekRow(i)));
+    paintDay(); paintHead();
+  }
+  function extend(up) {
+    const add = Array.from({ length: BLOCK }, (_, i) => i);
+    if (up) { first = I.addDays(first, -BLOCK * 7); nWeeks += BLOCK; gather(); weeksEl.prepend(...add.map(weekRow)); scroller.scrollTop += BLOCK * wk; }
+    else { const n0 = nWeeks; nWeeks += BLOCK; gather(); weeksEl.append(...add.map(i => weekRow(n0 + i))); }
+    clearTimeout(ensureT); ensureT = setTimeout(() => ensure(), 150);
+  }
+  function setWindow(around) { first = I.addDays(weekStart(around), -20 * 7); nWeeks = BLOCK * 3; }
+  const rowOf = d => Math.round((weekStart(d) - first) / 604800000);
+  function goTo(date, smooth) {
+    if (!open || !scroller) return;
+    const r = rowOf(date);
+    if (r < 3 || r > nWeeks - 4) { setWindow(date); rebuild(); smooth = false; }
+    const top = (rowOf(date) - 1) * wk;
+    scroller.scrollTo({ top: Math.max(0, top), behavior: smooth ? 'smooth' : 'instant' });
+    scrolled(); ensure();
   }
 
-  M.subscribe(() => { if (open) render(); });
+  /* ---------------------------------------------------------------- header, day panel */
+  function paintHead() {
+    if (!titleEl) return;
+    const row = Math.min(nWeeks - 1, Math.max(0, Math.floor((scroller.scrollTop + wk * .5) / wk))), d = I.addDays(first, row * 7 + 3);
+    const t = d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    if (titleEl.textContent !== t) titleEl.textContent = t;
+    const out = GC.accounts().filter(a => !GC.live(a));
+    subEl.replaceChildren(...[error ? h('span', { class: 'err' }, error) : loading ? 'Updating…' : null,
+      out.length && !loading ? h('button', { type: 'button', class: 'text', onclick: () => openSettings() }, out.length === 1 ? `${out[0].email} needs sign-in` : `${out.length} Google accounts need sign-in`) : null].filter(Boolean));
+    subEl.hidden = !subEl.childNodes.length;
+  }
+  function paintDay() {
+    if (!panel) return;
+    const list = byDay.get(I.dkey(sel)) || [];
+    panel.replaceChildren(h('h3', {}, sel.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })),
+      ...(list.length ? list.map(ev => h('button', { type: 'button', class: 'ev', style: `--c:${ev.color || 'var(--primary)'}`, onclick: () => editor(ev) },
+        h('span', { class: 'when' }, ev.allDay ? 'All day' : `${fmtTime(ev.start)} – ${fmtTime(ev.end)}`), h('b', {}, ev.title), ev.location && h('small', {}, ev.location),
+        ev.source === 'google' && h('small', { class: 'dim' }, ev.acct))) : [h('p', { class: 'dim' }, 'Nothing planned.')]));
+  }
+  function select(day) {
+    sel = startOfDay(day);
+    for (const c of weeksEl.querySelectorAll('.cd.sel')) { c.classList.remove('sel'); c.setAttribute('aria-selected', 'false'); }
+    const c = weeksEl.querySelector(`.cd[data-k="${I.dkey(sel)}"]`); c?.classList.add('sel'); c?.setAttribute('aria-selected', 'true');
+    paintDay();
+  }
+  function scrolled() {
+    raf = 0;
+    if (scroller.scrollTop < wk * 3) extend(true);
+    else if (scroller.scrollTop + scroller.clientHeight > hh + (nWeeks - 3) * wk) extend(false);
+    paintHead();
+    clearTimeout(ensureT); ensureT = setTimeout(() => ensure(), 200);
+  }
+
+  /* ---------------------------------------------------------------- layout */
+  function layout() {
+    if (!scroller || !scroller.clientHeight) return;
+    const old = wk, rows = scroller.scrollTop / old;
+    hh = wdEl.offsetHeight || 28;
+    wk = Math.round(Math.min(190, Math.max(PHONE.matches ? 54 : 104, (scroller.clientHeight - hh) / (PHONE.matches ? 6 : 5.6))));
+    weeksEl.style.setProperty('--wk', wk + 'px');
+    if (old !== wk) { scroller.scrollTop = rows * wk; if (PHONE.matches || old) rebuild(); }
+  }
+  function build() {
+    titleEl = h('h2'); subEl = h('div', { class: 'cal-sub', hidden: true });
+    const names = Array.from({ length: 7 }, (_, i) => new Date(2023, 0, 1 + fd + i).toLocaleDateString(undefined, { weekday: 'short' }));
+    wdEl = h('div', { class: 'wd', 'aria-hidden': 'true' }, names.map(n => h('span', {}, n)));
+    weeksEl = h('div', { class: 'weeks', role: 'grid', 'aria-label': 'Calendar' });
+    scroller = h('div', { class: 'cal-scroll', tabindex: '0' }, wdEl, weeksEl);
+    panel = h('aside', { class: 'cal-day', 'aria-live': 'polite' });
+    root.replaceChildren(
+      h('div', { class: 'cal-head' }, h('div', { class: 'cal-title' }, titleEl, subEl),
+        h('button', { type: 'button', class: 'text', onclick: () => { select(today); goTo(today, true); } }, 'Today'),
+        h('button', { type: 'button', class: 'primary', 'aria-label': 'New event', onclick: () => editor(null, sel) }, icon('plus'), h('span', {}, 'Event'))),
+      h('div', { class: 'cal-main' }, h('div', { class: 'cal-grid' }, scroller), panel));
+    scroller.addEventListener('scroll', () => { if (!raf) raf = requestAnimationFrame(scrolled); }, { passive: true });
+    weeksEl.addEventListener('click', e => { const c = e.target.closest('.cd'); if (c) select(I.parseKey(c.dataset.k)); });
+    weeksEl.addEventListener('dblclick', e => { const c = e.target.closest('.cd'); if (c && !e.target.closest('.ce')) editor(null, I.parseKey(c.dataset.k)); });
+    scroller.addEventListener('keydown', e => {
+      const step = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 }[e.key];
+      if (!step) return;
+      e.preventDefault(); const next = I.addDays(sel, step); select(next);
+      const el = weeksEl.querySelector(`.cd[data-k="${I.dkey(next)}"]`); if (!el) return goTo(next);
+      const y = el.parentElement.offsetTop - hh; if (y < scroller.scrollTop) scroller.scrollTop = y; else if (y + wk > scroller.scrollTop + scroller.clientHeight - hh) scroller.scrollTop = y + wk - scroller.clientHeight + hh * 2;
+    });
+    new ResizeObserver(() => layout()).observe(scroller);
+    PHONE.addEventListener?.('change', () => { layout(); rebuild(); });
+  }
+
+  M.subscribe(() => { if (!open) return; const s = M.files.get(FILE)?.sha || ''; if (s !== lastSha) { lastSha = s; rebuild(); } });
   return {
     get open() { return open; },
-    show() { open = true; root.hidden = false; render(); if (GC.connected()) loadGoogle(); },
+    show() {
+      open = true; root.hidden = false; renewed = false;
+      if (!scroller) build();
+      lastSha = M.files.get(FILE)?.sha || '';
+      sel = startOfDay(sel); setWindow(sel); layout(); rebuild();
+      requestAnimationFrame(() => { layout(); goTo(sel); });
+    },
     hide() { open = false; root.hidden = true; },
-    newEvent: () => editor(null, selected),
-    render, reloadGoogle: loadGoogle,
+    newEvent: () => editor(null, sel),
+    render: rebuild, reloadGoogle: refetch,
   };
 }

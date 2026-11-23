@@ -1,17 +1,31 @@
 // Optional Google Calendar sync (no server): Google's sign-in token flow in the browser + the Calendar REST API.
-// You bring your own OAuth client ID (Settings → Calendar). Nothing is requested until you connect.
+// You bring your own OAuth client ID (Settings → Accounts). Several Google accounts can be connected at once.
+// Nothing is requested until you add an account. Access tokens last about an hour and are never written to exports.
 import { ls } from './dom.js';
-import { dkey, tkey, parseKey, addDays } from './ics.js';
+import { dkey, tkey, parseKey } from './ics.js';
 
 const API = 'https://www.googleapis.com/calendar/v3', SCOPE = 'https://www.googleapis.com/auth/calendar';
 const KEY = 'gcal', CACHE = 'gcal-cache';
-const blank = { clientId: '', token: '', exp: 0, name: '', calendars: [] };
-export const state = () => ({ ...blank, ...ls.get(KEY, {}) });
-const save = patch => ls.set(KEY, { ...state(), ...patch });
-export const hasClientId = () => !!state().clientId;
-export const connected = () => { const s = state(); return !!(s.token && s.exp > Date.now()); };
-export const expired = () => { const s = state(); return !!(s.clientId && s.token && s.exp <= Date.now()); };
-export const setClientId = id => save({ clientId: id.trim() });
+
+function read() {
+  const s = ls.get(KEY, {});
+  if (!s.accounts) {                                   // older single-account format
+    const old = s.token || s.calendars?.length ? [{ email: s.name || 'Google account', token: s.token || '', exp: s.exp || 0, calendars: s.calendars || [] }] : [];
+    return { clientId: s.clientId || '', accounts: old };
+  }
+  return { clientId: s.clientId || '', accounts: s.accounts };
+}
+const write = s => ls.set(KEY, s);
+const patchAccount = (email, fn) => { const s = read(); s.accounts = s.accounts.map(a => a.email === email ? fn(a) : a); write(s); };
+
+export const state = read;
+export const accounts = () => read().accounts;
+export const account = email => accounts().find(a => a.email === email);
+export const live = a => !!(a?.token && a.exp > Date.now());
+export const hasClientId = () => !!read().clientId;
+export const setClientId = id => { const s = read(); s.clientId = id.trim(); write(s); };
+export const anyLive = () => accounts().some(live);
+export const anyExpired = () => accounts().some(a => !live(a));
 
 function loadGis() {
   if (window.google?.accounts?.oauth2) return Promise.resolve();
@@ -22,61 +36,87 @@ function loadGis() {
     document.head.append(s);
   });
 }
-/** Opens Google's consent popup (must be called from a click). Resolves when we have a token. */
-export async function connect() {
-  const { clientId } = state();
+/** Asks Google for an access token. `hint` picks a known account; without it Google shows its account chooser. */
+async function token({ hint, silent } = {}) {
+  const { clientId } = read();
   if (!clientId) throw new Error('Add your Google OAuth client ID first.');
   await loadGis();
   return new Promise((res, rej) => {
     const tc = window.google.accounts.oauth2.initTokenClient({
       client_id: clientId, scope: SCOPE,
-      callback: r => { if (r.error) return rej(new Error(r.error_description || r.error)); save({ token: r.access_token, exp: Date.now() + Math.max(60, (+r.expires_in || 3600) - 60) * 1000 }); res(); },
+      callback: r => r.error ? rej(new Error(r.error_description || r.error)) : res({ token: r.access_token, exp: Date.now() + Math.max(60, (+r.expires_in || 3600) - 60) * 1000 }),
       error_callback: e => rej(new Error(e?.type === 'popup_closed' ? 'Sign-in was cancelled.' : e?.message || 'Google sign-in failed')),
     });
-    tc.requestAccessToken({ prompt: state().calendars.length ? '' : 'consent' });
+    tc.requestAccessToken({ prompt: silent ? 'none' : hint ? '' : 'select_account', ...(hint ? { hint } : {}) });
   });
 }
-export function disconnect() {
-  const t = state().token;
-  try { if (t && window.google?.accounts?.oauth2) window.google.accounts.oauth2.revoke(t, () => {}); } catch { /* ignore */ }
-  ls.set(KEY, { ...blank, clientId: state().clientId }); localStorage.removeItem(CACHE);
-}
 
-async function api(path, { method = 'GET', body, headers } = {}) {
-  const s = state();
-  if (!s.token || s.exp <= Date.now()) throw Object.assign(new Error('Google session expired. Reconnect to keep syncing.'), { expired: true });
-  const r = await fetch(API + path, { method, headers: { Authorization: 'Bearer ' + s.token, ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined });
-  if (r.status === 401) { save({ exp: 0 }); throw Object.assign(new Error('Google session expired. Reconnect to keep syncing.'), { expired: true }); }
-  if (!r.ok && r.status !== 304) { const j = await r.json().catch(() => ({})); throw new Error(j.error?.message || `Google Calendar error ${r.status}`); }
+async function call(tok, path, { method = 'GET', body, headers } = {}) {
+  const r = await fetch(API + path, { method, headers: { Authorization: 'Bearer ' + tok, ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined });
+  if (!r.ok && r.status !== 304) { const j = await r.json().catch(() => ({})); throw Object.assign(new Error(r.status === 401 ? 'Google sign-in expired.' : j.error?.message || `Google Calendar error ${r.status}`), { expired: r.status === 401 }); }
   return r;
 }
-
-export async function refreshCalendars() {
-  const j = await (await api('/users/me/calendarList?fields=items(id,summary,primary,backgroundColor,selected,accessRole)')).json();
-  const old = new Map(state().calendars.map(c => [c.id, c]));
-  const calendars = (j.items || []).map(c => ({ id: c.id, name: c.summary, color: c.backgroundColor || '#4285f4', primary: !!c.primary, writable: /owner|writer/.test(c.accessRole || ''), on: old.has(c.id) ? old.get(c.id).on : c.selected !== false }));
-  save({ calendars, name: calendars.find(c => c.primary)?.name || state().name });
-  return calendars;
+async function api(email, path, opt) {
+  const a = account(email);
+  if (!live(a)) throw Object.assign(new Error(`${email} needs to sign in again.`), { expired: true, email });
+  try { return await call(a.token, path, opt); } catch (e) { if (e.expired) patchAccount(email, x => ({ ...x, exp: 0 })); throw Object.assign(e, { email }); }
 }
-export const setCalendarOn = (id, on) => save({ calendars: state().calendars.map(c => c.id === id ? { ...c, on } : c) });
 
-const norm = (it, cal) => {
-  const allDay = !!it.start?.date, start = allDay ? it.start.date : tkey(new Date(it.start.dateTime)), end = allDay ? it.end.date : tkey(new Date(it.end.dateTime));
-  return { id: it.id, title: it.summary || '(no title)', start, end, allDay, notes: it.description || '', location: it.location || '', source: 'google', calId: cal.id, color: cal.color, writable: cal.writable, etag: it.etag, recurring: !!it.recurringEventId };
+const toCalendars = (items, old = []) => {
+  const prev = new Map(old.map(c => [c.id, c]));
+  return (items || []).map(c => ({ id: c.id, name: c.summary, color: c.backgroundColor || '#4285f4', primary: !!c.primary, writable: /owner|writer/.test(c.accessRole || ''), on: prev.has(c.id) ? prev.get(c.id).on : c.selected !== false }));
 };
-/** Events of one calendar in [from, to). Conditional requests (ETag) make "nothing changed" a bodyless 304. */
-export async function events(cal, from, to) {
-  const ck = `${cal.id}|${dkey(from)}|${dkey(to)}`, cache = ls.get(CACHE, {}), hit = cache[ck];
-  const q = `/calendars/${encodeURIComponent(cal.id)}/events?singleEvents=true&orderBy=startTime&maxResults=250&timeMin=${encodeURIComponent(from.toISOString())}&timeMax=${encodeURIComponent(to.toISOString())}&fields=${encodeURIComponent('etag,nextPageToken,items(id,etag,summary,description,location,status,start,end,recurringEventId)')}`;
-  const r = await api(q, { headers: hit?.etag ? { 'If-None-Match': hit.etag } : {} });
-  if (r.status === 304 && hit) return hit.items.map(it => norm(it, cal));
-  const j = await r.json(); let items = j.items || [], token = j.nextPageToken;
-  for (let i = 0; token && i < 4; i++) { const more = await (await api(q + '&pageToken=' + token)).json(); items = items.concat(more.items || []); token = more.nextPageToken; }
-  items = items.filter(it => it.status !== 'cancelled' && (it.start?.date || it.start?.dateTime));
-  cache[ck] = { etag: j.etag, items }; ls.set(CACHE, cache);
-  return items.map(it => norm(it, cal));
+const LIST = '/users/me/calendarList?fields=items(id,summary,primary,backgroundColor,selected,accessRole)';
+
+/** Opens Google's popup (call from a click). Adds the account, or refreshes it when it is already known. Returns its email. */
+export async function connect(hint) {
+  const t = await token({ hint });
+  const items = (await (await call(t.token, LIST)).json()).items || [];
+  const email = items.find(c => c.primary)?.id || hint;
+  if (!email) throw new Error('Google did not say which account this is.');
+  const s = read(), old = s.accounts.find(a => a.email === email);
+  const next = { email, ...t, calendars: toCalendars(items, old?.calendars) };
+  s.accounts = old ? s.accounts.map(a => a.email === email ? next : a) : [...s.accounts, next];
+  write(s); return email;
 }
-export const cachedEvents = (cal, from, to) => (ls.get(CACHE, {})[`${cal.id}|${dkey(from)}|${dkey(to)}`]?.items || []).map(it => norm(it, cal));
+/** Quietly renews an expired token when Google still has the session. Never throws. */
+export async function renew(email) {
+  try { const t = await token({ hint: email, silent: true }); patchAccount(email, a => ({ ...a, ...t })); return true; } catch { return false; }
+}
+export async function disconnect(email) {
+  const a = account(email);
+  if (a?.token && live(a)) { try { await loadGis(); window.google.accounts.oauth2.revoke(a.token, () => {}); } catch { /* offline: the token expires by itself within the hour */ } }
+  const s = read(); s.accounts = s.accounts.filter(x => x.email !== email); write(s);
+  const c = ls.get(CACHE, {}); for (const k of Object.keys(c)) if (k.startsWith(email + '|')) delete c[k]; ls.set(CACHE, c);
+}
+export async function refreshCalendars(email) {
+  const items = (await (await api(email, LIST)).json()).items || [];
+  patchAccount(email, a => ({ ...a, calendars: toCalendars(items, a.calendars) }));
+}
+export const setCalendarOn = (email, id, on) => patchAccount(email, a => ({ ...a, calendars: a.calendars.map(c => c.id === id ? { ...c, on } : c) }));
+
+/** What gets exported: no access tokens, they expire in an hour anyway. */
+export const exportState = () => { const s = read(); return { clientId: s.clientId, accounts: s.accounts.map(a => ({ email: a.email, calendars: a.calendars })) }; };
+export const importState = o => write({ clientId: o?.clientId || '', accounts: (o?.accounts || []).map(a => ({ email: a.email, token: '', exp: 0, calendars: a.calendars || [] })) });
+
+const norm = (it, cal, email) => {
+  const allDay = !!it.start?.date, start = allDay ? it.start.date : tkey(new Date(it.start.dateTime)), end = allDay ? it.end.date : tkey(new Date(it.end.dateTime));
+  return { id: it.id, title: it.summary || '(no title)', start, end, allDay, notes: it.description || '', location: it.location || '', source: 'google', acct: email, calId: cal.id, color: cal.color, writable: cal.writable, etag: it.etag, recurring: !!it.recurringEventId };
+};
+const ckey = (email, cal, from, to) => `${email}|${cal.id}|${dkey(from)}|${dkey(to)}`;
+/** Events of one calendar in [from, to). Conditional requests (ETag) make "nothing changed" a bodyless 304. */
+export async function events(email, cal, from, to) {
+  const ck = ckey(email, cal, from, to), cache = ls.get(CACHE, {}), hit = cache[ck];
+  const q = `/calendars/${encodeURIComponent(cal.id)}/events?singleEvents=true&orderBy=startTime&maxResults=250&timeMin=${encodeURIComponent(from.toISOString())}&timeMax=${encodeURIComponent(to.toISOString())}&fields=${encodeURIComponent('etag,nextPageToken,items(id,etag,summary,description,location,status,start,end,recurringEventId)')}`;
+  const r = await api(email, q, { headers: hit?.etag ? { 'If-None-Match': hit.etag } : {} });
+  if (r.status === 304 && hit) return hit.items.map(it => norm(it, cal, email));
+  const j = await r.json(); let items = j.items || [], next = j.nextPageToken;
+  for (let i = 0; next && i < 4; i++) { const more = await (await api(email, q + '&pageToken=' + next)).json(); items = items.concat(more.items || []); next = more.nextPageToken; }
+  items = items.filter(it => it.status !== 'cancelled' && (it.start?.date || it.start?.dateTime));
+  const fresh = ls.get(CACHE, {}); fresh[ck] = { etag: j.etag, items }; ls.set(CACHE, fresh);     // re-read: parallel months must not overwrite each other
+  return items.map(it => norm(it, cal, email));
+}
+export const cachedEvents = (email, cal, from, to) => (ls.get(CACHE, {})[ckey(email, cal, from, to)]?.items || []).map(it => norm(it, cal, email));
 
 const body = ev => {
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -87,7 +127,7 @@ const body = ev => {
   return o;
 };
 const forget = () => localStorage.removeItem(CACHE);
-export async function create(calId, ev) { const j = await (await api(`/calendars/${encodeURIComponent(calId)}/events`, { method: 'POST', body: body(ev) })).json(); forget(); return j; }
-export async function update(ev) { const j = await (await api(`/calendars/${encodeURIComponent(ev.calId)}/events/${encodeURIComponent(ev.id)}`, { method: 'PATCH', body: body({ ...ev, rrule: undefined }) })).json(); forget(); return j; }
-export async function remove(ev) { await api(`/calendars/${encodeURIComponent(ev.calId)}/events/${encodeURIComponent(ev.id)}`, { method: 'DELETE' }); forget(); }
-export { addDays };
+const path = (calId, id) => `/calendars/${encodeURIComponent(calId)}/events${id ? '/' + encodeURIComponent(id) : ''}`;
+export async function create(email, calId, ev) { const j = await (await api(email, path(calId), { method: 'POST', body: body(ev) })).json(); forget(); return j; }
+export async function update(ev) { const j = await (await api(ev.acct, path(ev.calId, ev.id), { method: 'PATCH', body: body({ ...ev, rrule: undefined }) })).json(); forget(); return j; }
+export async function remove(ev) { await api(ev.acct, path(ev.calId, ev.id), { method: 'DELETE' }); forget(); }

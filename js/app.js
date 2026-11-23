@@ -714,7 +714,7 @@ async function boot() {
   const ic = (sel, ...nodes) => $(sel).append(...nodes);
   ic('#btnSync2', icon('sync')); ic('#btnSide', icon('more'));
   ic('#searchIcon', icon('search')); ic('#btnMenu', icon('menu'));
-  ic('#btnNote', icon('plus')); ic('#btnMore', icon('more')); ic('#emptyNew', icon('plus'), 'New note');
+  ic('#btnNote', icon('plus')); ic('#btnMore', icon('more'));
   applyPrefs();
   M.hooks.gate = () => prefs.files === 'smart' && M.metered();
   bindPullToRefresh(treeEl, $('#ptr'), () => G.configured() ? G.sync({ force: true }) : openSettings(true, settingsCtx));
@@ -722,8 +722,7 @@ async function boot() {
   $('#btnSync2').onclick = $('#status').onclick = syncNow;
   $('#status').onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); syncNow(); } };
   $('#emptyConnect').onclick = () => openSettings(true, settingsCtx);
-  $('#emptyList').onclick = openNav;
-  $('#btnNote').onclick = $('#emptyNew').onclick = () => newNote();
+  $('#btnNote').onclick = () => newNote();
   $('#btnSide').onclick = e => {
     const b = e.currentTarget.getBoundingClientRect();
     showMenu([
@@ -731,7 +730,6 @@ async function boot() {
       { icon: 'upload', label: 'Upload files', run: () => pickUpload() },
       { icon: 'tree', label: 'All files', run: () => openAllFiles(openFile, S.current) },
       '-',
-      { icon: 'sync', label: 'Sync now', run: syncNow },
       { icon: 'gear', label: 'Settings', run: () => openSettings(false, settingsCtx) },
     ], b.right, b.bottom + 4, true);
   };
