@@ -20,7 +20,7 @@ export const emit = (kind = 'tree') => subs.forEach(f => f(kind));
 
 export const PINS = '.notes-app.json';
 /** Files we always keep downloaded: notes (searchable, editable offline) and the pins file. */
-export const isEager = p => p === PINS || p === 'calendar.ics' || (isNote(p) && !isHidden(p));   // the calendar must be readable offline too
+export const isEager = p => p === PINS || p === 'calendar.ics' || p.startsWith('.google/') || (isNote(p) && !isHidden(p));   // the calendar must be readable offline too
 
 /** Size in bytes: from the content if it's on this device, else the size GitHub told us. */
 export const sizeOf = r => r.content == null ? (r.size ?? null) : typeof r.content === 'string' ? enc.encode(r.content).length : r.content.size;

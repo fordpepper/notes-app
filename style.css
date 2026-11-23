@@ -503,3 +503,8 @@ input.switch { appearance: none; -webkit-appearance: none; flex: none; width: 44
 input.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgb(0 0 0 / .3); transition: transform .18s var(--ease-out, ease); }
 input.switch:checked { background: var(--primary); } input.switch:checked::after { transform: translateX(18px); }
 input.switch:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+/* calendar links */
+textarea.links { width: 100%; min-height: 4.5em; font: inherit; font-size: .85em; resize: vertical; }
+.linknote { display: flex; flex-direction: column; align-items: flex-start; gap: .35em; font-size: .85em; }
+a.btn { display: inline-block; text-decoration: none; }

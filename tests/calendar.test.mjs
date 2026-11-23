@@ -24,7 +24,8 @@ const pad = n => String(n).padStart(2, '0'), now = new Date();
 const ymd = (d, h) => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${h == null ? '' : `T${pad(h)}0000`}`;
 const day = n => new Date(now.getFullYear(), now.getMonth(), Math.min(n, 28));
 const ics = `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:one@x\r\nDTSTART:${ymd(day(10), 9)}\r\nDTEND:${ymd(day(10), 10)}\r\nSUMMARY:Dentist\r\nLOCATION:Main St\\, 5\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:two@x\r\nDTSTART;VALUE=DATE:${ymd(day(15))}\r\nDTEND;VALUE=DATE:${ymd(day(17))}\r\nSUMMARY:Trip\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:three@x\r\nDTSTART:${ymd(day(2), 18)}\r\nDTEND:${ymd(day(2), 19)}\r\nSUMMARY:Weekly run\r\nRRULE:FREQ=WEEKLY\r\nBEGIN:VALARM\r\nTRIGGER:-PT15M\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`;
-const gh = createMock(); gh.seed({ 'Notes.txt': 'hello', 'calendar.ics': ics });
+const feedIcs = `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:f1\r\nDTSTART;TZID=America/New_York:${ymd(day(14), 9)}\r\nDTEND;TZID=America/New_York:${ymd(day(14), 10)}\r\nSUMMARY:Feed meeting\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:f2\r\nDTSTART:${ymd(day(15), 9)}\r\nDTEND:${ymd(day(15), 10)}\r\nRRULE:FREQ=DAILY;COUNT=5\r\nEXDATE:${ymd(day(17), 9)}\r\nSUMMARY:Feed daily\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:f3\r\nDTSTART:${ymd(day(20), 9)}\r\nDTEND:${ymd(day(20), 10)}\r\nSTATUS:CANCELLED\r\nSUMMARY:Feed cancelled\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`;
+const gh = createMock(); gh.seed({ 'Notes.txt': 'hello', 'calendar.ics': ics, '.google/links.txt': 'Work | https://calendar.google.com/calendar/ical/x/private-abc/basic.ics\n', '.google/1.ics': feedIcs });
 
 // ---- mocked Google: sign-in script + Calendar API. Two accounts: tok-1 = me@gmail.com, tok-2 = work@corp.com
 const gcalLog = [];
@@ -83,8 +84,12 @@ await p.waitForTimeout(400);
 ok('calendar is a long run of weeks, not one month', await p.locator('#cal .wk').count() >= 60);
 ok('title is the current month and today is on screen', (await title(p)).toLowerCase().includes(monthName(now)) && await p.locator('#cal .cd.today').evaluate(e => { const r = e.getBoundingClientRect(), s = document.querySelector('.cal-scroll').getBoundingClientRect(); return r.top >= s.top && r.bottom <= s.bottom; }));
 ok('ICS events from the repo show up (timed, multi-day, repeating)', (await chips(p)).filter(t => t === 'Dentist').length === 1 && (await chips(p)).filter(t => t === 'Trip').length === 2 && (await chips(p)).filter(t => t === 'Weekly run').length >= 3);
+ok('linked calendars (secret iCal address) show read-only events; EXDATE and cancelled are honoured', (await chips(p)).filter(t => t === 'Feed meeting').length === 1 && (await chips(p)).filter(t => t === 'Feed daily').length === 4 && !(await chips(p)).includes('Feed cancelled'), (await chips(p)).join('|'));
 ok('calendar view has only Today and Event buttons, no account buttons', (await p.locator('#cal .cal-head button:visible').allInnerTexts()).map(s => s.trim()).join(',') === 'Today,Event' && await p.locator('#cal button:has-text("Google"), #cal button:has-text("Connect"), #cal button:has-text("account")').count() === 0);
 await p.screenshot({ path: `${SHOTS}/c1-month.png` });
+{ await settings(p); await p.click('dialog details.sect:has(summary:has-text("Calendars")) summary');
+  ok('settings: links are listed, and one click opens GitHub with the workflow prefilled', (await p.inputValue('dialog textarea[aria-label="Calendar links"]')).includes('private-abc') && /github\.com\/me\/notes\/new\/.*calendar-links\.yml[\s\S]*cron/.test(decodeURIComponent(await p.locator('dialog a.btn').getAttribute('href'))));
+  await closeSettings(p); }
 
 // scrolling like Apple Calendar: continuous, in both directions, header follows
 const scroll = (y, rel) => p.evaluate(([y, rel]) => { const s = document.querySelector('.cal-scroll'); s.scrollTop = rel ? s.scrollTop + y : y; return s.scrollTop; }, [y, rel]);

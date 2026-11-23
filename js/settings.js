@@ -5,6 +5,7 @@ import { h, toast } from './dom.js';
 import { modal, confirmBox } from './dialogs.js';
 import { icon } from './icons.js';
 import * as GC from './gcal.js';
+import * as FD from './feeds.js';
 import { prefs, savePrefs, applyPrefs, PALETTES, swatch } from './theme.js';
 import * as V from './vault.js';
 
@@ -106,6 +107,16 @@ export function openSettings(first, ctx) {
       if (!GC.hasClientId()) { adv.open = true; clientId.focus(); throw new Error('Google sign-in needs a client ID. Paste one here; the steps are in the README.'); }
       await GC.connect(); changed();
     });
+    const linksArea = h('textarea', { rows: 3, class: 'links', placeholder: 'Work | https://calendar.google.com/calendar/ical/…/basic.ics', spellcheck: 'false', autocapitalize: 'off', 'aria-label': 'Calendar links', 
+      onchange: async e => { try { await FD.saveLinks(e.target.value); paintLinks(); ctx.onCalendarChanged?.(); if (G.configured()) G.sync({ force: true }); } catch (ex) { accErr.textContent = ex.message; } } });
+    linksArea.value = FD.linksText();
+    const linkNote = h('div', { class: 'linknote' });
+    function paintLinks() {
+      const n = FD.parseLinks(linksArea.value).length;
+      linkNote.replaceChildren(...(!n ? [] : !G.configured() ? ['Connect GitHub first, so the links can be fetched.'] : FD.hasWorkflow() ? [`${n} calendar${n > 1 ? 's' : ''}, updated about every 15 minutes.`]
+        : [h('a', { class: 'tonal btn', href: FD.workflowUrl(G.getCfg()), target: '_blank', rel: 'noopener' }, 'Turn on automatic updates'), h('small', {}, 'Opens GitHub with the file filled in. Press “Commit new file”, once.')]));
+    }
+    paintLinks();
     const importCal = guard(async () => {
       const f = await pickFile('.ics,text/calendar'); if (!f) return;
       const { importEvents } = await import('./calendar.js'), r = await importEvents(await f.text());
@@ -188,7 +199,10 @@ export function openSettings(first, ctx) {
           labelled('Accent colour', palBox),
           labelled('Text size', chips(SIZES, () => prefs.size, v => set('size', +v))),
           labelled('Hidden files', chips([[true, 'Show'], [false, 'Hide']], () => prefs.hidden, v => { set('hidden', v === true || v === 'true'); ctx.onHiddenChanged?.(); }))),
-        h('details', { class: 'sect' }, h('summary', {}, 'Calendars', calSum), calBox),
+        h('details', { class: 'sect' }, h('summary', {}, 'Calendars', calSum), calBox,
+          h('div', { class: 'group' }, h('h5', {}, 'Calendar links, no sign-in'),
+            h('p', {}, 'Google Calendar → Settings → your calendar → Integrate calendar → “Secret address in iCal format”. Paste it here, one per line, optionally as “Name | link”. Public iCloud and Outlook calendar links work too. These calendars are read-only. Keep your notes repo private: the link gives read access to that calendar.'),
+            linksArea, linkNote)),
         h('details', { class: 'sect' },
           h('summary', {}, 'More'),
           h('div', { class: 'group' },

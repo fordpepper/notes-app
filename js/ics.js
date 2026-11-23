@@ -11,11 +11,22 @@ const escapeText = s => (s || '').replace(/\\/g, '\\\\').replace(/\n/g, '\\n').r
 function fold(line) { const out = []; while (line.length > 74) { out.push(line.slice(0, 74)); line = ' ' + line.slice(74); } out.push(line); return out.join('\r\n'); }
 
 /** "20261123", "20261123T090000", "20261123T090000Z" -> key string (UTC values are converted to local time). */
-function icsDate(v, params) {
+/** Wall-clock time in an IANA zone -> local Date (null if the zone is unknown). */
+function zoned(y, mo, d, h, mi, tz) {
+  try {
+    const f = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric' });
+    const shown = t => { const o = {}; for (const p of f.formatToParts(new Date(t))) o[p.type] = +p.value; return Date.UTC(o.year, o.month - 1, o.day, o.hour, o.minute); };
+    const want = Date.UTC(y, mo - 1, d, h, mi); let t = want - (shown(want) - want); t = want - (shown(t) - t);
+    return new Date(t);
+  } catch { return null; }
+}
+export function icsDate(v, params) {
   const m = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?(Z)?)?$/.exec(v.trim());
   if (!m) return null;
   if (m[4] == null || /VALUE=DATE(?!-)/i.test(params || '')) return { key: `${m[1]}-${m[2]}-${m[3]}`, allDay: true };
   if (m[7]) return { key: tkey(new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)))), allDay: false };
+  const tz = /TZID=([^;:]+)/i.exec(params || '')?.[1]?.replace(/^"|"$/g, '');
+  if (tz) { const z = zoned(+m[1], +m[2], +m[3], +m[4], +m[5], tz); if (z) return { key: tkey(z), allDay: false }; }
   return { key: `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}`, allDay: false };
 }
 
@@ -80,8 +91,9 @@ export function occurrences(ev, from, to) {
   const make = d => { const ns = ev.allDay ? dkey(d) : tkey(d), ne = ev.allDay ? dkey(new Date(d.getTime() + len)) : tkey(new Date(d.getTime() + len)); return { ...ev, start: ns, end: ne, series: !!ev.rrule }; };
   if (!ev.rrule) return e > from && s < to ? [make(s)] : [];
   const r = parseRule(ev.rrule), step = Math.max(1, +r.INTERVAL || 1), until = r.UNTIL ? icsDate(r.UNTIL.replace(/Z$/, ''))?.key : null, max = +r.COUNT || Infinity;
+  const ex = new Set((ev.extra || []).filter(x => /^EXDATE/i.test(x)).flatMap(x => { const i = x.indexOf(':'); return x.slice(i + 1).split(',').map(v => icsDate(v, x.slice(0, i))?.key.slice(0, 10)).filter(Boolean); }));
   const out = []; let n = 0;
-  const push = d => { const o = make(d); if (until && dkey(d) > until.slice(0, 10)) return false; if (++n > max) return false; if (parseKey(o.end) > from && d < to) out.push(o); return d < to; };
+  const push = d => { const o = make(d); if (until && dkey(d) > until.slice(0, 10)) return false; if (++n > max) return false; if (ex.has(dkey(d))) return d < to; if (parseKey(o.end) > from && d < to) out.push(o); return d < to; };
   if (r.FREQ === 'DAILY') for (let d = new Date(s); d < to && out.length < 500; d = addDays(d, step)) { if (!push(d)) break; }
   else if (r.FREQ === 'WEEKLY') {
     const days = r.BYDAY ? r.BYDAY.split(',').map(x => DAYS.indexOf(x.slice(-2))).filter(x => x >= 0) : [s.getDay()];

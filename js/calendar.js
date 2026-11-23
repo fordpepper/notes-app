@@ -4,6 +4,7 @@
 import * as M from './model.js';
 import * as I from './ics.js';
 import * as GC from './gcal.js';
+import * as FD from './feeds.js';
 import { h, toast } from './dom.js';
 import { icon } from './icons.js';
 import { modal, confirmBox } from './dialogs.js';
@@ -28,6 +29,8 @@ const ym = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}
 const uid = () => 'e' + Math.random().toString(36).slice(2, 10);
 const BLOCK = 26, PHONE = matchMedia('(max-width: 640px)');
 
+const sig = () => [FILE, FD.LINKS, ...FD.feeds().map(f => `${FD.DIR}${f.n}.ics`)].map(p => M.files.get(p)?.sha || '').join();
+
 export function initCalendar(root, { openSettings }) {
   const fd = firstDay(), today = startOfDay(new Date());
   const weekStart = d => I.addDays(startOfDay(d), -((d.getDay() - fd + 7) % 7));
@@ -39,6 +42,7 @@ export function initCalendar(root, { openSettings }) {
   const activeG = key => { const [email, calId] = key.split('|'); return !!GC.account(email)?.calendars.some(c => c.id === calId && c.on); };
   function gather() {
     const from = first, to = I.addDays(first, nWeeks * 7), seen = new Set(), list = localEvents().flatMap(e => I.occurrences(e, from, to));
+    for (const e of FD.events(from, to)) list.push(e);
     for (const [k, v] of gdata) if (activeG(k)) for (const e of v) { const id = `${e.acct}|${e.calId}|${e.id}|${e.start}`; if (!seen.has(id)) { seen.add(id); list.push(e); } }
     byDay.clear();
     for (const e of list) {
@@ -193,7 +197,7 @@ export function initCalendar(root, { openSettings }) {
     panel.replaceChildren(h('h3', {}, sel.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })),
       ...(list.length ? list.map(ev => h('button', { type: 'button', class: 'ev', style: `--c:${ev.color || 'var(--primary)'}`, onclick: () => editor(ev) },
         h('span', { class: 'when' }, ev.allDay ? 'All day' : `${fmtTime(ev.start)} – ${fmtTime(ev.end)}`), h('b', {}, ev.title), ev.location && h('small', {}, ev.location),
-        ev.source === 'google' && h('small', { class: 'dim' }, ev.acct))) : [h('p', { class: 'dim' }, 'Nothing planned.')]));
+        ev.source !== 'local' && h('small', { class: 'dim' }, ev.acct))) : [h('p', { class: 'dim' }, 'Nothing planned.')]));
   }
   function select(day) {
     sel = startOfDay(day);
@@ -244,13 +248,13 @@ export function initCalendar(root, { openSettings }) {
     PHONE.addEventListener?.('change', () => { layout(); rebuild(); });
   }
 
-  M.subscribe(() => { if (!open) return; const s = M.files.get(FILE)?.sha || ''; if (s !== lastSha) { lastSha = s; rebuild(); } });
+  M.subscribe(() => { if (!open) return; const s = sig(); if (s !== lastSha) { lastSha = s; rebuild(); } });
   return {
     get open() { return open; },
     show() {
       open = true; root.hidden = false; renewed = false;
       if (!scroller) build();
-      lastSha = M.files.get(FILE)?.sha || '';
+      lastSha = sig();
       sel = startOfDay(sel); setWindow(sel); layout(); rebuild();
       requestAnimationFrame(() => { layout(); goTo(sel); });
     },
