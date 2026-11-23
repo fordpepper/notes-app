@@ -1,11 +1,13 @@
 // Previews for csv / json / code / html / docx / xlsx / pptx / zip / extension-less files. Run: node docs.test.mjs
-import { chromium } from 'playwright';
+import { chromium, firefox } from 'playwright';
+const launcher = process.env.BROWSER === 'firefox' ? firefox : chromium;
 import http from 'node:http';
 import fs from 'node:fs';
 import zlib from 'node:zlib';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createMock } from './mock-github.mjs';
+const openMenu = async (pg, label) => { await pg.click('#btnSide'); await pg.click(`#menu button:has-text("${label}")`); };
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -54,7 +56,7 @@ gh.seed({
 });
 let fails = 0; const errors = [];
 const ok = (name, c, extra) => { console.log((c ? 'PASS ' : 'FAIL ') + name + (!c && extra ? '  ' + extra : '')); if (!c) fails++; };
-const browser = await chromium.launch();
+const browser = await launcher.launch();
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
 await ctx.route('https://api.github.com/**', async route => {
   const rq = route.request(), u = new URL(rq.url());
@@ -154,19 +156,19 @@ await ph.close();
 
 // ---- hidden files are shown by default (one setting) ----
 ok('hidden files show in the list by default', await p.locator('.row .name:text-is(".secret")').count() === 1);
-await p.click('#btnSettings'); await p.click('.chip:text-is("Hide")'); await p.click('dialog button:has-text("Close")');
+await openMenu(p, 'Settings'); await p.click('.chip:text-is("Hide")'); await p.click('dialog button:has-text("Close")');
 ok('…and can be hidden in Settings', await p.locator('.row .name:text-is(".secret")').count() === 0);
-await p.click('#btnSettings'); await p.click('.chip:text-is("Show")'); await p.click('dialog button:has-text("Close")');
-await p.click('#btnSettings'); await p.click('dialog details.sect:last-of-type summary'); await p.waitForTimeout(200);
+await openMenu(p, 'Settings'); await p.click('.chip:text-is("Show")'); await p.click('dialog button:has-text("Close")');
+await openMenu(p, 'Settings'); await p.click('dialog details.sect:last-of-type summary'); await p.waitForTimeout(200);
 const labels = await p.evaluate(() => [...document.querySelectorAll('dialog .field')].map(f => f.firstChild.textContent.trim()).filter(Boolean));
 ok('every setting appears once in Settings', labels.length >= 8 && new Set(labels).size === labels.length, labels.join(' | '));
 await p.screenshot({ path: `${SHOTS}/d8-settings.png` });
 await p.click('dialog button:has-text("Close")');
 // ---- bottom bar: the status text is never cut ----
 const foot = await p.evaluate(() => { const sp = document.querySelector('#status span'); sp.textContent = 'Offline · 12 changes waiting to sync with GitHub'; return { clipped: sp.scrollWidth > sp.clientWidth + 1, ellipsis: getComputedStyle(sp).textOverflow === 'ellipsis', rows: document.querySelectorAll('.foot-btns .icon').length }; });
-ok('bottom bar: full sync text visible, buttons on their own row', !foot.clipped && !foot.ellipsis && foot.rows === 5, JSON.stringify(foot));
+ok('bottom bar: only the sync text, never cut off', !foot.clipped && !foot.ellipsis && foot.rows === 0, JSON.stringify(foot));
 // ---- All files tree ----
-await p.click('#btnTree'); await p.waitForSelector('dialog.alltree .tn');
+await openMenu(p, 'All files'); await p.waitForSelector('dialog.alltree .tn');
 const st0 = await p.locator('dialog.alltree .tstats').innerText();
 ok('all files: drawn as a tree with a root and nested branches', await p.locator('dialog.alltree ul.ttree > li.root > ul > li').count() > 3 && await p.locator('dialog.alltree .rootrow').innerText() === 'me/notes');
 ok('all files: totals with sizes and not-yet-downloaded data', /\d+ files · [\d.]+ (KB|MB|B)/.test(st0), st0);
@@ -191,7 +193,7 @@ ok('top bar title is centred for every file type', bad.length === 0, bad.join(',
 
 // ---- settings stay small; collapse the list, focus mode ----
 await open('Guide');
-await p.click('#btnSettings');
+await openMenu(p, 'Settings');
 ok('settings are short: theme, size, font, files, sync interval (+ accent)', await p.locator('dialog .chips').count() === 6 && await p.locator('dialog .switch').count() === 0);
 const before = await p.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--primary').trim());
 await p.locator('.pal.custom input').fill('#d81b60');

@@ -6,6 +6,7 @@ import zlib from 'node:zlib';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createMock } from './mock-github.mjs';
+const openMenu = async (pg, label) => { await pg.click('#btnSide'); await pg.click(`#menu button:has-text("${label}")`); };
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SHOTS = path.join(path.dirname(fileURLToPath(import.meta.url)), '_shots');
@@ -116,7 +117,7 @@ const pc = await ph.evaluate(() => { const r = document.querySelector('.tb-c').g
 ok('phone: title centred and nothing overflows', Math.abs(pc.dx) < 2 && !pc.overflow, JSON.stringify(pc));
 await ph.waitForTimeout(500);
 await ph.screenshot({ path: `${SHOTS}/m3-phone-preview.png` });
-await page.click('#btnSettings'); await page.waitForTimeout(400); await page.screenshot({ path: `${SHOTS}/m4-settings.png` }); await page.keyboard.press('Escape');
+await openMenu(page, 'Settings'); await page.waitForTimeout(400); await page.screenshot({ path: `${SHOTS}/m4-settings.png` }); await page.keyboard.press('Escape');
 await page.click('#btnMore'); await page.waitForTimeout(300); await page.screenshot({ path: `${SHOTS}/m5-menu.png` });
 ok('no console errors', errors.length === 0, errors.join(' | '));
 await browser.close(); server.close();

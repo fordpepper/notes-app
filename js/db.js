@@ -16,6 +16,8 @@ const tx = (mode, fn) => open().then(db => new Promise((res, rej) => {
 export const db = {
   all: () => tx('readonly', s => s.getAll()),
   put: r => tx('readwrite', s => s.put(r)),
+  /** Many records in one transaction: far cheaper than one transaction each (esp. in Firefox). */
+  putMany: rs => rs.length ? tx('readwrite', s => { for (const r of rs) s.put(r); }) : Promise.resolve(),
   del: p => tx('readwrite', s => s.delete(p)),
   clear: () => tx('readwrite', s => s.clear()),
 };

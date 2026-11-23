@@ -15,7 +15,7 @@ const MAX_FILE = 25 * 1024 * 1024;   // keep uploads phone- and API-friendly
 
 /* ---------------------------------------------------------------- state */
 const S = {
-  current: null, dir: '', q: '', kind: null, shownSha: null,
+  view: 'notes', current: null, dir: '', q: '', kind: null, shownSha: null,
   mode: ls.get('mode', 'edit'), altMode: 'preview',     // view mode for markdown / for other previewable text (csv, json, code…)
   expanded: new Set(ls.get('expanded', [])),
   fresh: null,                       // path of a just-created, still-untouched note (discarded if left empty)
@@ -106,7 +106,8 @@ function renderTree() {
     }
     for (const f of n.files.sort((a, b) => U.naturalCmp(a.path, b.path))) frag.append(row({ type: 'file', path: f.path, depth, name: displayName(f.path), ico: fileIcon(f.path), active: f.path === S.current }));
   };
-  walk(M.buildTree(prefs.hidden), 0);
+  const root = M.buildTree(prefs.hidden); root.files = root.files.filter(f => f.path !== 'calendar.ics');      // the Calendar manages this file
+  walk(root, 0);
   if (!frag.querySelector('.row')) {
     const msg = !G.configured() ? 'No notes yet. Create one, or connect GitHub in Settings to load your repo.'
       : G.status.state === 'syncing' ? (G.status.msg || 'Syncing your notes…') : 'No notes yet. Tap “New note” to start.';
@@ -162,7 +163,7 @@ function bindPullToRefresh(el, ptr, onRefresh) {
 function renderSearch(el) {
   const q = S.q.toLowerCase(), hits = [];
   for (const r of M.files.values()) {
-    if (r.deleted || (!prefs.hidden && U.isHidden(r.path))) continue;
+    if (r.deleted || r.path === 'calendar.ics' || (!prefs.hidden && U.isHidden(r.path))) continue;
     const nameHit = r.path.toLowerCase().includes(q);
     let snip = '';
     if (typeof r.content === 'string') {
@@ -182,6 +183,7 @@ function renderSearch(el) {
 
 /* ---------------------------------------------------------------- file operations */
 async function openFile(path) {
+  if (S.view === 'calendar') await setView('notes');
   await flush();
   if (!M.exists(path)) return;
   await discardFresh(path);
@@ -375,9 +377,6 @@ function syncHeader() {
   const note = U.isNote(p);
   if (document.activeElement !== titleEl) titleEl.value = note ? U.stem(p) : U.basename(p);
   $('#crumb').textContent = U.dirname(p).split('/').filter(Boolean).join('  ›  ') || 'Notes';
-  const pinned = M.getPins().includes(p), pb = $('#btnPin');
-  pb.classList.toggle('on', pinned); pb.title = pinned ? 'Unpin' : 'Pin to top'; pb.setAttribute('aria-label', pb.title); pb.hidden = !note;
-  pb.replaceChildren(icon(pinned ? 'star' : 'starO'));
   $('#modes').hidden = !U.previewOf(p);
 }
 titleEl.addEventListener('keydown', e => {
@@ -577,7 +576,8 @@ function renderStatus() {
   else if (n) { s = 'pending'; text = `${n} change${n > 1 ? 's' : ''} to sync`; }
   else text = st.at ? `Synced ${ago(st.at)}` : 'Up to date';
   document.body.dataset.sync = s; el.dataset.s = s; el.title = text; el.lastChild.textContent = text;
-  for (const b of [$('#btnSync'), $('#btnSync2')]) { b.classList.toggle('spin', st.state === 'syncing'); b.classList.toggle('pending', on && n > 0 && st.state !== 'syncing'); }
+  const b = $('#btnSync2');                                      // phone top bar
+  b.classList.toggle('spin', st.state === 'syncing'); b.classList.toggle('pending', on && n > 0 && st.state !== 'syncing');
 }
 G.onStatus(() => { renderStatus(); if (G.status.state !== 'syncing') { renderTree(); if (G.status.state === 'idle') schedulePrefetch(); } });
 setInterval(renderStatus, 30000);
@@ -599,14 +599,16 @@ async function prefetchFiles() {
   prefetch = { running: true, done: 0, total: todo.length };
   renderStatus();
   try {
-    await U.pool(todo, 2, async r => {
-      if (stopPrefetch()) return;
+    for (const r of todo) {                                       // one at a time, only while the page is idle and visible, so typing and scrolling stay smooth
+      if (stopPrefetch()) break;
+      if (document.visibilityState !== 'visible') { await new Promise(res => setTimeout(res, 2000)); }
+      await new Promise(res => (window.requestIdleCallback || setTimeout)(res, { timeout: 1500 }));
       try { await M.ensureContent(r.path); } catch { /* skipped; retried next time */ }
       prefetch.done++; renderStatus();
-    });
+    }
   } finally { prefetch.running = false; renderStatus(); }
 }
-const schedulePrefetch = (ms = 1500) => { clearTimeout(prefetchT); prefetchT = setTimeout(prefetchFiles, ms); };
+const schedulePrefetch = (ms = 6000) => { clearTimeout(prefetchT); prefetchT = setTimeout(prefetchFiles, ms); };
 navigator.connection?.addEventListener?.('change', () => { schedulePrefetch(500); if (S.current && S.kind === 'other' && !M.needsApproval(S.current)) showFile(S.current); });
 addEventListener('online', () => schedulePrefetch());
 document.addEventListener('preview-refresh', () => renderPreview());
@@ -634,6 +636,19 @@ M.subscribe(kind => {
   });
 });
 
+/* ---------------------------------------------------------------- notes / calendar views */
+let calCtl = null;
+async function setView(v) {
+  if (v === S.view) { if (v === 'calendar' && narrow.matches) closeNav(); return; }
+  S.view = v; document.body.dataset.view = v;
+  for (const t of document.querySelectorAll('#tabs button')) { const on = t.dataset.view === v; t.classList.toggle('on', on); t.setAttribute('aria-selected', String(on)); }
+  if (v === 'calendar') {
+    await flush();
+    if (!calCtl) { const { initCalendar } = await import('./calendar.js'); calCtl = initCalendar($('#cal'), { openSettings: () => openSettings(false, settingsCtx) }); }
+    calCtl.show(); if (narrow.matches) closeNav();
+  } else calCtl?.hide();
+}
+
 /* ---------------------------------------------------------------- global UI wiring */
 const settingsCtx = {
   onWiped: () => { closeFile(); renderTree(); renderStatus(); },
@@ -641,6 +656,7 @@ const settingsCtx = {
   onPollChanged: schedulePoll,
   onFilesChanged: () => schedulePrefetch(300),
   onHiddenChanged: () => renderTree(),
+  onCalendarChanged: () => calCtl?.reloadGoogle?.(),
 };
 function toggleFocus() {
   const on = document.body.classList.toggle('focus');
@@ -696,24 +712,30 @@ function setupServiceWorker() {
 /* ---------------------------------------------------------------- boot */
 async function boot() {
   const ic = (sel, ...nodes) => $(sel).append(...nodes);
-  ic('#btnSync', icon('sync')); ic('#btnSync2', icon('sync')); ic('#btnSettings', icon('gear'));
+  ic('#btnSync2', icon('sync')); ic('#btnSide', icon('more'));
   ic('#searchIcon', icon('search')); ic('#btnMenu', icon('menu'));
-  ic('#btnNote', icon('plus')); ic('#btnTree', icon('tree')); ic('#btnFolder', icon('folderPlus')); ic('#btnUpload', icon('upload'));
-  ic('#btnPin', icon('starO')); ic('#btnMore', icon('more')); ic('#emptyNew', icon('plus'), 'New note');
+  ic('#btnNote', icon('plus')); ic('#btnMore', icon('more')); ic('#emptyNew', icon('plus'), 'New note');
   applyPrefs();
   M.hooks.gate = () => prefs.files === 'smart' && M.metered();
   bindPullToRefresh(treeEl, $('#ptr'), () => G.configured() ? G.sync({ force: true }) : openSettings(true, settingsCtx));
 
-  $('#btnSync').onclick = $('#btnSync2').onclick = $('#status').onclick = syncNow;
+  $('#btnSync2').onclick = $('#status').onclick = syncNow;
   $('#status').onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); syncNow(); } };
-  $('#btnSettings').onclick = () => openSettings(false, settingsCtx);
   $('#emptyConnect').onclick = () => openSettings(true, settingsCtx);
   $('#emptyList').onclick = openNav;
   $('#btnNote').onclick = $('#emptyNew').onclick = () => newNote();
-  $('#btnTree').onclick = () => openAllFiles(openFile, S.current);
-  $('#btnFolder').onclick = () => newFolder();
-  $('#btnUpload').onclick = () => pickUpload();
-  $('#btnPin').onclick = () => S.current && togglePin(S.current);
+  $('#btnSide').onclick = e => {
+    const b = e.currentTarget.getBoundingClientRect();
+    showMenu([
+      { icon: 'folderPlus', label: 'New folder', run: () => newFolder() },
+      { icon: 'upload', label: 'Upload files', run: () => pickUpload() },
+      { icon: 'tree', label: 'All files', run: () => openAllFiles(openFile, S.current) },
+      '-',
+      { icon: 'sync', label: 'Sync now', run: syncNow },
+      { icon: 'gear', label: 'Settings', run: () => openSettings(false, settingsCtx) },
+    ], b.right, b.bottom + 4, true);
+  };
+  for (const t of document.querySelectorAll('#tabs button')) t.onclick = () => setView(t.dataset.view);
   $('#btnMore').onclick = e => {
     const b = e.currentTarget.getBoundingClientRect(), p = S.current;
     if (!p) return;
@@ -734,8 +756,9 @@ async function boot() {
   if (G.configured()) { G.sync(); schedulePoll(); }
   else if (!localStorage.getItem('welcomed')) { localStorage.setItem('welcomed', '1'); openSettings(true, settingsCtx); }
   $('#emptyConnect').hidden = G.configured();
+  requestAnimationFrame(() => requestAnimationFrame(() => document.body.classList.remove('booting')));
   const idle = window.requestIdleCallback || (f => setTimeout(f, 1500));
   idle(() => { setupServiceWorker(); T.prune(); });             // after first paint: nothing competes with startup
-  navigator.storage?.persist?.().catch(() => {});
+  if (matchMedia('(display-mode: standalone)').matches) navigator.storage?.persist?.().catch(() => {});   // installed app only: browsers like Firefox show a permission prompt for this
 }
 boot();

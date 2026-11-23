@@ -7,7 +7,7 @@ const DEV = BUILD.startsWith('__');          // local development: always try th
 const APP = `notes-app-${BUILD}`, LIB = 'notes-lib-v1', KEEP = new Set([APP, LIB, 'notes-thumbs-v1']);   // thumbnails survive updates
 const SHELL = ['./', 'index.html', 'style.css', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png',
   'js/app.js', 'js/db.js', 'js/model.js', 'js/sync.js', 'js/util.js', 'js/dom.js', 'js/icons.js', 'js/theme.js',
-  'js/dialogs.js', 'js/settings.js', 'js/preview.js', 'js/media.js', 'js/docs.js', 'js/pptx.js', 'js/odf.js', 'js/alltree.js', 'js/editor-tools.js'];
+  'js/dialogs.js', 'js/settings.js', 'js/preview.js', 'js/media.js', 'js/docs.js', 'js/pptx.js', 'js/odf.js', 'js/ics.js', 'js/gcal.js', 'js/calendar.js', 'js/alltree.js', 'js/editor-tools.js'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(APP).then(c => c.addAll(SHELL.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));

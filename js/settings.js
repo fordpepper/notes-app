@@ -4,6 +4,7 @@ import * as G from './sync.js';
 import { h, toast } from './dom.js';
 import { modal, confirmBox } from './dialogs.js';
 import { icon } from './icons.js';
+import * as GC from './gcal.js';
 import { prefs, savePrefs, applyPrefs, PALETTES, FONTS, swatch } from './theme.js';
 
 const DOTS = ['teal', 'blue', 'indigo', 'violet', 'rose', 'orange', 'green', 'graphite'];
@@ -48,6 +49,23 @@ export function openSettings(first, ctx) {
       palBox.replaceChildren(...DOTS.map(id => dot(id, swatch(PALETTES[id].seeds)[0], PALETTES[id].name)), custom);
     };
     paintPal();
+
+    // Calendar (optional): applies immediately, like appearance
+    const calErr = h('div', { class: 'err', role: 'alert' }), calBox = h('div', { class: 'group' }), calSum = h('small', {});
+    const clientId = h('input', { value: GC.state().clientId, placeholder: 'xxxx.apps.googleusercontent.com', autocomplete: 'off', spellcheck: 'false', autocapitalize: 'off', onchange: e => GC.setClientId(e.target.value) });
+    const paintCal = () => {
+      calSum.textContent = GC.connected() ? (GC.state().name || 'Google connected') : GC.expired() ? 'Reconnect needed' : 'Notes only';
+      const st = GC.state();
+      calBox.replaceChildren(
+        h('p', {}, 'Events are saved in calendar.ics in your notes repo. You can also connect Google Calendar to see and edit those events here. This is optional.'),
+        !GC.connected() && !GC.expired() && h('label', { class: 'field' }, 'Google OAuth client ID', clientId, h('small', {}, 'Create a “Web application” client in ', h('a', { href: 'https://console.cloud.google.com/apis/credentials', target: '_blank', rel: 'noopener' }, 'Google Cloud Console'), ', turn on the Google Calendar API, and add ', h('b', {}, location.origin), ' as an authorised JavaScript origin.')),
+        GC.connected() || GC.expired()
+          ? h('div', { class: 'calrow' }, h('span', {}, st.name || 'Google Calendar'), GC.expired() && h('button', { type: 'button', class: 'text', onclick: async () => { calErr.textContent = ''; try { await GC.connect(); paintCal(); ctx.onCalendarChanged?.(); } catch (e) { calErr.textContent = e.message; } } }, 'Reconnect'), h('button', { type: 'button', class: 'text', onclick: () => { GC.disconnect(); paintCal(); ctx.onCalendarChanged?.(); } }, 'Disconnect'))
+          : h('button', { type: 'button', class: 'tonal', onclick: async () => { calErr.textContent = ''; GC.setClientId(clientId.value); try { await GC.connect(); await GC.refreshCalendars(); paintCal(); ctx.onCalendarChanged?.(); } catch (e) { calErr.textContent = e.message; } } }, 'Connect Google Calendar'),
+        ...(GC.connected() ? st.calendars.map(c => h('label', { class: 'setting calsel' }, h('span', { class: 'cdot', style: `background:${c.color}` }), c.name, h('input', { type: 'checkbox', class: 'switch', checked: c.on, onchange: e => { GC.setCalendarOn(c.id, e.target.checked); ctx.onCalendarChanged?.(); } }))) : []),
+        calErr);
+    };
+    paintCal();
 
     const err = h('div', { class: 'err', role: 'alert' });
     const save = h('button', { class: 'primary' }, G.configured() ? 'Save' : 'Connect');
@@ -94,6 +112,7 @@ export function openSettings(first, ctx) {
           labelled('Accent colour', palBox),
           labelled('Text size', chips(SIZES, () => prefs.size, v => set('size', +v))),
           labelled('Hidden files', chips([[true, 'Show'], [false, 'Hide']], () => prefs.hidden, v => { set('hidden', v === true || v === 'true'); ctx.onHiddenChanged?.(); }))),
+        h('details', { class: 'sect' }, h('summary', {}, 'Calendar', calSum), calBox),
         h('details', { class: 'sect' },
           h('summary', {}, 'More'),
           h('div', { class: 'group' },

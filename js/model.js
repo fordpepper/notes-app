@@ -20,7 +20,7 @@ export const emit = (kind = 'tree') => subs.forEach(f => f(kind));
 
 export const PINS = '.notes-app.json';
 /** Files we always keep downloaded: notes (searchable, editable offline) and the pins file. */
-export const isEager = p => p === PINS || (isNote(p) && !isHidden(p));
+export const isEager = p => p === PINS || p === 'calendar.ics' || (isNote(p) && !isHidden(p));   // the calendar must be readable offline too
 
 /** Size in bytes: from the content if it's on this device, else the size GitHub told us. */
 export const sizeOf = r => r.content == null ? (r.size ?? null) : typeof r.content === 'string' ? enc.encode(r.content).length : r.content.size;
@@ -32,6 +32,7 @@ export const livePaths = () => { const out = []; for (const r of files.values())
 export const dirExists = d => { const pre = d + '/'; for (const r of files.values()) if (!r.deleted && r.path.startsWith(pre)) return true; return false; };
 
 export const put = r => { files.set(r.path, r); return db.put(r); };
+export const putBatch = rs => { for (const r of rs) files.set(r.path, r); return db.putMany(rs); };
 export const drop = p => { files.delete(p); return db.del(p); };
 export async function load() { for (const r of await db.all()) files.set(r.path, r); emit(); }
 export async function wipe() { files.clear(); await db.clear(); emit(); }

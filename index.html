@@ -13,7 +13,7 @@
 <link rel="stylesheet" href="style.css">
 <link rel="modulepreload" href="js/app.js"><link rel="modulepreload" href="js/model.js"><link rel="modulepreload" href="js/sync.js"><link rel="modulepreload" href="js/util.js"><link rel="modulepreload" href="js/dom.js"><link rel="modulepreload" href="js/db.js"><link rel="modulepreload" href="js/icons.js"><link rel="modulepreload" href="js/dialogs.js"><link rel="modulepreload" href="js/theme.js"><link rel="modulepreload" href="js/settings.js"><link rel="modulepreload" href="js/preview.js"><link rel="modulepreload" href="js/media.js"><link rel="modulepreload" href="js/alltree.js"><link rel="modulepreload" href="js/editor-tools.js">
 </head>
-<body>
+<body class="booting">
 <!-- Logo: colours follow the accent setting -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
   <defs>
@@ -33,19 +33,12 @@
     <header class="side-head">
       <div class="search"><span id="searchIcon"></span><input id="q" type="search" placeholder="Search" autocomplete="off" aria-label="Search notes"></div>
       <button id="btnNote" class="icon" title="New note" aria-label="New note"></button>
+      <button id="btnSide" class="icon" title="More" aria-label="More"></button>
     </header>
+    <div id="tabs" class="vtabs" role="tablist"><button data-view="notes" class="on" role="tab" aria-selected="true">Notes</button><button data-view="calendar" role="tab" aria-selected="false">Calendar</button></div>
     <div id="ptr" aria-hidden="true"></div>
     <nav id="tree" aria-label="Notes"></nav>
-    <footer id="foot">
-      <div id="status" role="button" tabindex="0" title="Sync now"><i class="dot"></i><span></span></div>
-      <div class="foot-btns">
-        <button id="btnTree" class="icon sm" title="All files" aria-label="All files"></button>
-        <button id="btnFolder" class="icon sm" title="New folder" aria-label="New folder"></button>
-        <button id="btnUpload" class="icon sm" title="Upload files" aria-label="Upload files"></button>
-        <button id="btnSync" class="icon sm" title="Sync now (Ctrl+S)" aria-label="Sync now"></button>
-        <button id="btnSettings" class="icon sm" title="Settings" aria-label="Settings"></button>
-      </div>
-    </footer>
+    <footer id="foot"><div id="status" role="button" tabindex="0" title="Sync now"><i class="dot"></i><span></span></div></footer>
   </aside>
   <div id="scrim"></div>
   <main id="main">
@@ -60,7 +53,6 @@
       </div>
       <div class="tb-r">
         <div id="modes" class="seg"></div>
-        <button id="btnPin" class="icon" title="Pin" aria-label="Pin"></button>
         <button id="btnMore" class="icon" title="More" aria-label="More actions"></button>
       </div>
       <div id="progress"></div>
@@ -73,6 +65,7 @@
       </div>
       <div id="toolbar"></div>
     </div>
+    <section id="cal" hidden aria-label="Calendar"></section>
     <div id="empty">
       <div class="empty-card">
         <p id="emptyMsg">Pick a note, or start a new one.</p>

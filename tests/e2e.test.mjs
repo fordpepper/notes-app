@@ -1,10 +1,12 @@
 // Drives the real app in headless Chromium against an in-memory GitHub. Run: node e2e.test.mjs
-import { chromium } from 'playwright';
+import { chromium, firefox } from 'playwright';
+const launcher = process.env.BROWSER === 'firefox' ? firefox : chromium;
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createMock } from './mock-github.mjs';
+const openMenu = async (pg, label) => { await pg.click('#btnSide'); await pg.click(`#menu button:has-text("${label}")`); };
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SHOTS = path.join(path.dirname(fileURLToPath(import.meta.url)), '_shots');
@@ -46,7 +48,7 @@ const ok = (name, c, extra) => { console.log((c ? 'PASS ' : 'FAIL ') + name + (!
 const errors = [];
 const watch = page => { page.on('pageerror', e => errors.push(e.message)); page.on('console', m => m.type() === 'error' && !/Failed to load resource|net::ERR/.test(m.text()) && errors.push(m.text())); };
 const idle = (page, ms = 8000) => page.waitForFunction(() => document.querySelector('#status').dataset.s === 'idle' && /Synced|Up to date/.test(document.querySelector('#status').textContent), null, { timeout: ms });
-const browser = await chromium.launch();
+const browser = await launcher.launch();
 
 /* ============================== DESKTOP ============================== */
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
@@ -107,7 +109,7 @@ await page.waitForTimeout(300);
 ok('an untouched new note is discarded when you leave it', await page.locator('.row .name', { hasText: 'Untitled' }).count() === 0 && await page.locator('.row.file').count() === before);
 
 // folder + move
-await page.click('#btnFolder'); await page.fill('dialog input', 'Archive'); await page.keyboard.press('Enter');
+await openMenu(page, 'New folder'); await page.fill('dialog input', 'Archive'); await page.keyboard.press('Enter');
 await page.waitForSelector('.row.folder:has-text("Archive")');
 await page.click('.row .name:text-is("Meeting notes")');
 await page.click('.row.file.active .more', { force: true });
@@ -140,7 +142,7 @@ ok('Undo brings it back', true);
 // the colour palette drives the whole UI: logo, favicon, controls
 const prim = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--primary').trim());
 const primBefore = await prim(), favBefore = await page.evaluate(() => decodeURIComponent(document.querySelector('link[rel=icon]').href));
-await page.click('#btnSettings');
+await openMenu(page, 'Settings');
 await page.click('.pal[data-id="rose"]');
 const primAfter = await prim();
 ok('palette changes the primary colour', primAfter !== primBefore && /^#[0-9a-f]{6}$/.test(primAfter));
@@ -153,10 +155,10 @@ ok('black theme applies', await page.evaluate(() => getComputedStyle(document.bo
 await page.click('dialog button:has-text("Close")');
 await page.reload(); await page.waitForSelector('.row');
 ok('appearance persisted across reload', await page.evaluate(() => document.documentElement.dataset.theme === 'black' && JSON.parse(localStorage.prefs).palette === 'rose'));
-await page.click('#btnSettings'); await page.click('.chip:text-is("Match system")'); await page.click('.pal[data-id="teal"]'); await page.click('dialog button:has-text("Close")');
+await openMenu(page, 'Settings'); await page.click('.chip:text-is("Match system")'); await page.click('.pal[data-id="teal"]'); await page.click('dialog button:has-text("Close")');
 
 // push
-await page.click('#btnSync'); await idle(page);
+await page.click('#status'); await idle(page);
 const T = gh.tree();
 ok('pushed: new .txt note in its folder', T.has('Archive/Meeting notes.txt') && gh.text('Archive/Meeting notes.txt').includes('agenda'));
 ok('pushed: attachment', T.has('Archive/attachments/doc.pdf'));
@@ -165,8 +167,8 @@ ok('no Untitled note leaked into the repo', ![...T.keys()].some(k => /Untitled/.
 ok('undo-after-delete left the repo unchanged', gh.has('Ideas.txt'));
 
 // data use: an idle poll is a single conditional request
-await page.click('#btnSync'); await idle(page);      // first check after a push learns the new ETag
-gh.resetLog(); await page.click('#btnSync'); await idle(page);
+await page.click('#status'); await idle(page);      // first check after a push learns the new ETag
+gh.resetLog(); await page.click('#status'); await idle(page);
 ok('idle sync = 1 request (304)', gh.log.length === 1 && /304/.test(gh.log[0]), gh.log.join(' | '));
 
 // offline: reload from the service worker cache
@@ -179,7 +181,7 @@ await page.click('#ed'); await page.keyboard.press('Control+End'); await page.ke
 await page.waitForTimeout(800);
 ok('offline edit is queued, not lost', await page.evaluate(() => document.querySelector('#status').textContent) !== '' );
 await ctx.setOffline(false);
-await page.click('#btnSync'); await idle(page, 10000);
+await page.click('#status'); await idle(page, 10000);
 ok('queued edit pushed once online', gh.text('Shopping list.txt').endsWith('bread'));
 
 /* ============================== AUTO-UPDATE ============================== */

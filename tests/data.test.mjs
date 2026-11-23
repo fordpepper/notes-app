@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createMock } from './mock-github.mjs';
+const openMenu = async (pg, label) => { await pg.click('#btnSide'); await pg.click(`#menu button:has-text("${label}")`); };
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
@@ -48,7 +49,7 @@ const local = (p, name) => p.evaluate(async n => (await import('/js/model.js')).
   const { p, ctx, errors } = await session({ type: 'wifi' });
   await until(p, async () => { const M = await import('/js/model.js'); return [...M.files.values()].every(r => r.content != null); });
   ok('wifi: files that were never opened are downloaded automatically', await local(p, 'pic.png') && await local(p, 'data.bin'));
-  await p.click('#btnTree'); await p.waitForSelector('dialog.alltree');
+  await openMenu(p, 'All files'); await p.waitForSelector('dialog.alltree');
   ok('wifi: tree shows nothing left to download', await p.locator('dialog.alltree li.file.remote').count() === 0);
   ok('wifi: no errors', errors.length === 0, errors.join('|')); await ctx.close();
 }
