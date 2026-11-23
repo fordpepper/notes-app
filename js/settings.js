@@ -103,7 +103,7 @@ export function openSettings(first, ctx) {
     paintAccounts();
     const addGoogle = guard(async () => {
       GC.setClientId(clientId.value);
-      if (!GC.hasClientId()) { adv.open = true; clientId.focus(); throw new Error('Paste your Google OAuth client ID first. The steps are in the README.'); }
+      if (!GC.hasClientId()) { adv.open = true; clientId.focus(); throw new Error('Google sign-in needs a client ID. Paste one here; the steps are in the README.'); }
       await GC.connect(); changed();
     });
     const importCal = guard(async () => {
@@ -137,7 +137,7 @@ export function openSettings(first, ctx) {
       h('summary', {}, G.configured() ? 'Repository, token and Google client ID' : 'Repository and token'),
       field('GitHub repository', repo), field('GitHub access token', token, h('span', {}, 'Create a ', h('a', { href: 'https://github.com/settings/personal-access-tokens/new', target: '_blank', rel: 'noopener' }, 'fine-grained token'), ' for just your notes repo with ', h('b', {}, 'Contents: Read and write'), '. It stays on this device.')),
       field('Branch', branch), field('Folder inside the repo', root, 'Only sync this subfolder, e.g. “notes”. Empty = whole repo.'),
-      field('Google OAuth client ID (optional)', clientId, h('span', {}, 'Needed once to add Google accounts. Create a “Web application” client in ', h('a', { href: 'https://console.cloud.google.com/apis/credentials', target: '_blank', rel: 'noopener' }, 'Google Cloud Console'), ', turn on the Google Calendar API and add ', h('b', {}, location.origin), ' as an authorised JavaScript origin.')));
+      field(GC.DEFAULT_CLIENT_ID ? 'Own Google client ID (optional)' : 'Google OAuth client ID', clientId, h('span', {}, GC.DEFAULT_CLIENT_ID ? 'Not needed: the app already has one. Only fill this in to use your own Google project. ' : 'Needed once to add Google accounts. ', 'Create a “Web application” client in ', h('a', { href: 'https://console.cloud.google.com/apis/credentials', target: '_blank', rel: 'noopener' }, 'Google Cloud Console'), ', turn on the Google Calendar API and add ', h('b', {}, location.origin), ' as an authorised JavaScript origin.')));
     const err = h('div', { class: 'err', role: 'alert' });
     const save = h('button', { class: 'primary' }, G.configured() ? 'Save' : 'Connect');
     const form = h('form', {

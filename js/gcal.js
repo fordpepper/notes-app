@@ -22,7 +22,11 @@ export const state = read;
 export const accounts = () => read().accounts;
 export const account = email => accounts().find(a => a.email === email);
 export const live = a => !!(a?.token && a.exp > Date.now());
-export const hasClientId = () => !!read().clientId;
+/** Shipped with the app so people only press "Sign in". A client ID is public by design (it is not a secret).
+ *  Create a "Web application" client once in Google Cloud Console, then put its ID here. */
+export const DEFAULT_CLIENT_ID = '';
+export const clientId = () => read().clientId || DEFAULT_CLIENT_ID;
+export const hasClientId = () => !!clientId();
 export const setClientId = id => { const s = read(); s.clientId = id.trim(); write(s); };
 export const anyLive = () => accounts().some(live);
 export const anyExpired = () => accounts().some(a => !live(a));
@@ -38,12 +42,12 @@ function loadGis() {
 }
 /** Asks Google for an access token. `hint` picks a known account; without it Google shows its account chooser. */
 async function token({ hint, silent } = {}) {
-  const { clientId } = read();
-  if (!clientId) throw new Error('Add your Google OAuth client ID first.');
+  const clientId_ = clientId();
+  if (!clientId_) throw new Error('Google sign-in is not set up in this copy of the app. Add a client ID under Settings → Accounts → Repository, token and Google client ID.');
   await loadGis();
   return new Promise((res, rej) => {
     const tc = window.google.accounts.oauth2.initTokenClient({
-      client_id: clientId, scope: SCOPE,
+      client_id: clientId_, scope: SCOPE,
       callback: r => r.error ? rej(new Error(r.error_description || r.error)) : res({ token: r.access_token, exp: Date.now() + Math.max(60, (+r.expires_in || 3600) - 60) * 1000 }),
       error_callback: e => rej(new Error(e?.type === 'popup_closed' ? 'Sign-in was cancelled.' : e?.message || 'Google sign-in failed')),
     });
