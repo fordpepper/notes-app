@@ -13,7 +13,7 @@ jobs:
       - name: Assemble site (only runtime files; tests/ and docs stay out)
         run: |
           mkdir _site
-          cp -r index.html style.css sw.js manifest.webmanifest js vendor icons _site/
+          cp -r index.html privacy.html style.css sw.js manifest.webmanifest js vendor icons _site/
           sed -i "s/__BUILD__/${GITHUB_SHA::10}/" _site/sw.js     # unique cache per deploy => clean auto-updates
           grep -q "${GITHUB_SHA::10}" _site/sw.js
       - uses: actions/upload-pages-artifact@v3
