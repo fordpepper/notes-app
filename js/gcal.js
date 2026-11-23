@@ -24,7 +24,7 @@ export const account = email => accounts().find(a => a.email === email);
 export const live = a => !!(a?.token && a.exp > Date.now());
 /** Shipped with the app so people only press "Sign in". A client ID is public by design (it is not a secret).
  *  Create a "Web application" client once in Google Cloud Console, then put its ID here. */
-export const DEFAULT_CLIENT_ID = '';
+export const DEFAULT_CLIENT_ID = '153287173251-0nj08f57jqc818qp6r6rv0lmd71jao4f.apps.googleusercontent.com';
 export const clientId = () => read().clientId || DEFAULT_CLIENT_ID;
 export const hasClientId = () => !!clientId();
 export const setClientId = id => { const s = read(); s.clientId = id.trim(); write(s); };

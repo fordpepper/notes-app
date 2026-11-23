@@ -136,12 +136,13 @@ ok('no font options', !sb.fonts);
 ok('all login / transfer buttons sit together in one row', sb.same && sb.btns.join('|') === 'Add Google account|Import calendar file|Export settings|Import settings', JSON.stringify(sb.btns));
 ok('settings has no duplicated buttons', (() => { const seen = new Map(); for (const l of sb.labels) seen.set(l, (seen.get(l) || 0) + 1); return [...seen].every(([l, n]) => n === 1 || l === ''); })(), JSON.stringify(sb.labels));
 await p.screenshot({ path: `${SHOTS}/c4-settings.png` });
-// add without client id -> helpful message
+// built-in client ID, then an own one
 await p.click('#addGoogle');
-ok('adding a Google account without a client ID explains what to do', /client ID/.test(await p.locator('dialog .accts ~ .err, dialog .err').allInnerTexts().then(a => a.join(' '))));
+ok('no client ID typed in: the field is empty and the button still works (built-in ID)', await p.inputValue('dialog input[aria-label="Google OAuth client ID"]') === ''); await p.click('#addGoogle'); await p.waitForFunction(() => document.querySelectorAll('.acct').length >= 2);
+if (!await p.locator('dialog details.adv[open]').count()) await p.click('dialog details.adv summary');
 await p.fill('dialog input[aria-label="Google OAuth client ID"]', 'test-client.apps.googleusercontent.com');
-await p.click('#addGoogle'); await p.waitForFunction(() => document.querySelectorAll('.acct').length >= 2);
 await p.click('#addGoogle'); await p.waitForFunction(() => document.querySelectorAll('.acct').length >= 3);
+
 const accts = await p.locator('.acct b').allInnerTexts();
 ok('two Google accounts can be signed in at once', accts.includes('me@gmail.com') && accts.includes('work@corp.com'), accts.join(','));
 ok('second sign-in lets you choose the account', await p.evaluate(() => window.__prompts.join(',')) === 'select_account|,select_account|');
