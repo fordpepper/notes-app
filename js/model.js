@@ -157,7 +157,7 @@ export function buildTree(showHidden = false) {
     const parts = r.path.split('/');
     let n = root;
     for (let i = 0; i < parts.length - 1 && n; i++) {
-      if (!showHidden && parts[i].startsWith('.')) { n = null; break; }
+      if ((!showHidden || (i === 0 && parts[0] === '.google')) && parts[i].startsWith('.')) { n = null; break; }   // .google holds the calendar-link files: internal
       let d = n.dirs.get(parts[i]);
       if (!d) { d = { name: parts[i], path: join(n.path, parts[i]), dirs: new Map(), files: [] }; n.dirs.set(parts[i], d); }
       n = d;

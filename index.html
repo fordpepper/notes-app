@@ -10,6 +10,7 @@
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <script>try{var r=document.documentElement,P=JSON.parse(localStorage.getItem('prefs')||'{}'),T=JSON.parse(localStorage.getItem('tv')||'null'),th=P.theme||'auto';if(th!=='auto')r.dataset.theme=th;var m=th==='auto'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):th;if(T&&T[m]){T[m].split(';').forEach(function(x){var i=x.indexOf(':');r.style.setProperty(x.slice(0,i),x.slice(i+1))});r.style.colorScheme=m==='light'?'light':'dark'}(P.hide||[]).forEach(function(k){r.classList.add('hide-'+k)})}catch(e){}</script>
+<script>if(parent!==window&&/[#&](access_token|error)=/.test(location.hash)){try{parent.postMessage({gcal:location.hash},location.origin)}catch(e){}window.stop()}</script>
 <link rel="stylesheet" href="style.css">
 <link rel="modulepreload" href="js/app.js"><link rel="modulepreload" href="js/model.js"><link rel="modulepreload" href="js/sync.js"><link rel="modulepreload" href="js/util.js"><link rel="modulepreload" href="js/dom.js"><link rel="modulepreload" href="js/db.js"><link rel="modulepreload" href="js/icons.js"><link rel="modulepreload" href="js/dialogs.js"><link rel="modulepreload" href="js/theme.js"><link rel="modulepreload" href="js/settings.js"><link rel="modulepreload" href="js/preview.js"><link rel="modulepreload" href="js/media.js"><link rel="modulepreload" href="js/alltree.js"><link rel="modulepreload" href="js/editor-tools.js">
 </head>

@@ -28,7 +28,7 @@ const feedIcs = `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:f1\r\nDTS
 const gh = createMock(); gh.seed({ 'Notes.txt': 'hello', 'calendar.ics': ics, '.google/links.txt': 'Work | https://calendar.google.com/calendar/ical/x/private-abc/basic.ics\n', '.google/1.ics': feedIcs });
 
 // ---- mocked Google: sign-in script + Calendar API. Two accounts: tok-1 = me@gmail.com, tok-2 = work@corp.com
-const gcalLog = [];
+const gcalLog = [], authLog = [], revoked = [], deny = { v: false }; let nTok = 0;
 const at = (d, h) => new Date(now.getFullYear(), now.getMonth(), d, h, 0).toISOString();
 const gEvents = { 'tok-1': [{ id: 'g1', etag: '"1"', summary: 'Google lunch', status: 'confirmed', start: { dateTime: at(12, 12) }, end: { dateTime: at(12, 13) } }], 'tok-2': [{ id: 'w1', etag: '"1"', summary: 'Work sync', status: 'confirmed', start: { dateTime: at(13, 9) }, end: { dateTime: at(13, 10) } }] };
 const EMAIL = { 'tok-1': 'me@gmail.com', 'tok-2': 'work@corp.com' };
@@ -43,7 +43,15 @@ async function session(viewport, { google = true, storage, setup } = {}) {
     return route.fulfill({ status: res.status, headers: { ...cors, 'content-type': 'application/json' }, body: res.json ? JSON.stringify(res.json) : '' });
   });
   if (google) {
-    await ctx.route('https://accounts.google.com/gsi/client', r => r.fulfill({ contentType: 'text/javascript', body: `window.__n=0;window.google={accounts:{oauth2:{initTokenClient:c=>({requestAccessToken:o=>setTimeout(()=>{ if(o.prompt==='none'&&window.__deny) return c.error_callback({type:'popup_failed_to_open'}); const t=o.hint==='work@corp.com'?'tok-2':o.hint==='me@gmail.com'?'tok-1':'tok-'+(++window.__n); window.__prompts=(window.__prompts||[]).concat(o.prompt+'|'+(o.hint||'')); c.callback({access_token:t,expires_in:3600}) },20)}),revoke:(t,cb)=>{window.__revoked=(window.__revoked||[]).concat(t);cb&&cb()}}}};` }));
+    await ctx.route('https://accounts.google.com/o/oauth2/v2/auth*', r => {
+      const q = new URL(r.request().url()).searchParams, hint = q.get('login_hint'), prompt = q.get('prompt') || '', back = h => r.fulfill({ status: 302, headers: { location: `${q.get('redirect_uri')}#${h}&state=${q.get('state')}` } });
+      authLog.push(`${prompt}|${hint || ''}|${q.get('response_type')}|${q.get('scope').includes('calendar.events')}`);
+      if (prompt === 'none' && deny.v) return back('error=login_required');
+      if (hint === 'denied@x.com') return back('error=access_denied');
+      const t = hint === 'work@corp.com' ? 'tok-2' : hint === 'me@gmail.com' ? 'tok-1' : 'tok-' + (++nTok);
+      back(`access_token=${t}&token_type=Bearer&expires_in=3600`);
+    });
+    await ctx.route('https://oauth2.googleapis.com/revoke', r => { revoked.push(new URLSearchParams(r.request().postData()).get('token')); r.fulfill({ status: 200, body: '' }); });
     await ctx.route('https://www.googleapis.com/calendar/v3/**', async route => {
       const rq = route.request(), u = new URL(rq.url()), cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' };
       if (rq.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
@@ -145,7 +153,7 @@ await p.click('#addGoogle'); await p.waitForFunction(() => document.querySelecto
 
 const accts = await p.locator('.acct b').allInnerTexts();
 ok('two Google accounts can be signed in at once', accts.includes('me@gmail.com') && accts.includes('work@corp.com'), accts.join(','));
-ok('second sign-in lets you choose the account', await p.evaluate(() => window.__prompts.join(',')) === 'select_account|,select_account|');
+ok('second sign-in lets you choose the account', authLog.slice(0, 2).join() === 'select_account||token|true,select_account||token|true');
 await p.click('dialog details.sect:has(summary:has-text("Calendars")) summary');
 ok('calendars of both accounts are listed', (await p.locator('dialog .calsel').allInnerTexts()).join('|').includes('me@gmail.com') && (await p.locator('dialog .calsel').allInnerTexts()).join('|').includes('work@corp.com'));
 await closeSettings(p);
@@ -171,14 +179,14 @@ ok('revisits use conditional requests (nothing new = no body)', await until(() =
 // remove one account
 await settings(p); await p.locator('.acct:has(b:text-is("work@corp.com")) button:has-text("Remove")').click(); await closeSettings(p);
 await noChip(p, 'Work sync');
-ok('removing an account removes only its events and revokes its token', (await chips(p)).includes('Google lunch') && await p.evaluate(() => window.__revoked.join()) === 'tok-2');
+ok('removing an account removes only its events and revokes its token', (await chips(p)).includes('Google lunch') && revoked.join() === 'tok-2');
 
 // expired token: renewed quietly, otherwise a note that leads to settings
 await p.evaluate(() => { const g = JSON.parse(localStorage.gcal); g.accounts.forEach(a => a.exp = 0); localStorage.gcal = JSON.stringify(g); });
 await p.reload(); await p.waitForSelector('.row.file'); await p.click('#tabs button[data-view=calendar]'); await hasChip(p, 'Google lunch');
-ok('an expired Google session is renewed without any button', gcalLog.filter(l => /calendarList/.test(l)).length >= 0 && await p.evaluate(() => window.__prompts.at(-1)) === 'none|me@gmail.com');
-await p.evaluate(() => { window.__deny = true; const g = JSON.parse(localStorage.gcal); g.accounts.forEach(a => a.exp = 0); localStorage.gcal = JSON.stringify(g); });
-await p.reload(); await p.evaluate(() => { window.__deny = true; }); await p.waitForSelector('.row.file'); await p.evaluate(() => { window.__deny = true; }); await p.click('#tabs button[data-view=calendar]');
+ok('an expired Google session is renewed without any button', gcalLog.filter(l => /calendarList/.test(l)).length >= 0 && authLog.at(-1).startsWith('none|me@gmail.com|'));
+deny.v = true; await p.evaluate(() => { const g = JSON.parse(localStorage.gcal); g.accounts.forEach(a => a.exp = 0); localStorage.gcal = JSON.stringify(g); });
+await p.reload(); await p.waitForSelector('.row.file'); await p.click('#tabs button[data-view=calendar]');
 await p.waitForSelector('.cal-sub button');
 ok('if Google needs you again, the calendar only says so and points to Settings', /needs sign-in/.test(await p.locator('.cal-sub button').innerText()) && await p.locator('#cal button:has-text("Add")').count() === 0);
 await p.click('.cal-sub button'); await p.waitForSelector('dialog.full');
@@ -240,6 +248,18 @@ for (const [w, hgt] of [[390, 800], [360, 640], [320, 568]]) {
   if (w === 390) await ph.p.screenshot({ path: `${SHOTS}/c5-editor.png` });
   await ph.p.click('dialog.evdlg .evbar .text:first-child'); await ph.p.waitForTimeout(100);
 }
+// phone settings: nothing is stretched (collapsed sections stay compact, single buttons keep their natural width)
+for (const [w, hgt] of [[390, 800], [360, 640]]) {
+  await ph.p.setViewportSize({ width: w, height: hgt }); await ph.p.evaluate(() => document.querySelector('#btnMenu')?.click()); await ph.p.waitForTimeout(200);
+  await ph.p.evaluate(() => document.querySelector('#btnSide')?.click()); await ph.p.locator('#menu button:has-text("Settings")').click(); await ph.p.waitForSelector('dialog.full');
+  for (const t of ['Calendars', 'More']) await ph.p.locator(`dialog details.sect:has(> summary:has-text("${t}")) > summary`).click();
+  const st = await ph.p.evaluate(() => { const box = document.querySelector('dialog .mbody').getBoundingClientRect(); const wd = sel => [...document.querySelectorAll(sel)].map(e => Math.round(e.getBoundingClientRect().width)); return { sect: Math.max(...[...document.querySelectorAll('dialog details.sect:not([open])')].map(e => e.getBoundingClientRect().height), 0), resync: wd('dialog button.ghost'), auto: wd('dialog a.btn'), body: Math.round(box.width) }; });
+  ok(`phone ${w}: settings buttons keep their natural width and collapsed sections stay compact`, st.sect <= 60 && st.resync.every(x => x < st.body * .6) && st.auto.every(x => x < st.body * .8), JSON.stringify(st));
+  await ph.p.click('dialog button:has-text("Close")');
+}
+// a sign-in address that this app did not start is ignored and cleaned from the address bar
+{ const before = await ph.p.evaluate(() => localStorage.gcal); await ph.p.goto(URL0 + '?t=1#access_token=evil&state=nope&expires_in=3600'); await ph.p.waitForSelector('.row.file');
+  ok('a foreign access_token in the address is ignored and removed', await ph.p.evaluate(() => localStorage.gcal) === before && await ph.p.evaluate(() => location.hash) === ''); }
 ok('no console errors', errors.length === 0, errors.join(' | '));
 await browser.close(); server.close();
 console.log(fails ? `\n${fails} FAILED` : '\nall passed'); process.exit(fails ? 1 : 0);

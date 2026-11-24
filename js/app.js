@@ -745,6 +745,7 @@ async function boot() {
   $('#q').addEventListener('input', debounce(e => { S.q = e.target.value.trim(); renderTree(); }, 120));
   $('#q').addEventListener('keydown', e => { if (e.key === 'Escape') { e.target.value = ''; S.q = ''; renderTree(); } });
 
+  const signIn = /[#&](access_token|error)=/.test(location.hash) ? await import('./gcal.js').then(g => g.finishSignIn()) : null;
   await M.load();
   const launched = await handleLaunch();
   const last = ls.get('last', null);
@@ -754,6 +755,7 @@ async function boot() {
   if (G.configured()) { G.sync(); schedulePoll(); }
   else if (!localStorage.getItem('welcomed')) { localStorage.setItem('welcomed', '1'); openSettings(true, settingsCtx); }
   $('#emptyConnect').hidden = G.configured();
+  if (signIn) { toast(signIn.email ? `Signed in as ${signIn.email}` : signIn.error); openSettings(false, settingsCtx, { accounts: true }); }
   requestAnimationFrame(() => requestAnimationFrame(() => document.body.classList.remove('booting')));
   const idle = window.requestIdleCallback || (f => setTimeout(f, 1500));
   idle(() => { setupServiceWorker(); T.prune(); });             // after first paint: nothing competes with startup

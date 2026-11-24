@@ -1,4 +1,4 @@
-// Optional Google Calendar sync (no server): Google's sign-in token flow in the browser + the Calendar REST API.
+// Optional Google Calendar sync (no server): Google's browser sign-in (redirect, access token in the address) + the Calendar REST API.
 // You bring your own OAuth client ID (Settings → Accounts). Several Google accounts can be connected at once.
 // Nothing is requested until you add an account. Access tokens last about an hour and are never written to exports.
 import { ls } from './dom.js';
@@ -31,29 +31,19 @@ export const setClientId = id => { const s = read(); s.clientId = id.trim(); wri
 export const anyLive = () => accounts().some(live);
 export const anyExpired = () => accounts().some(a => !live(a));
 
-function loadGis() {
-  if (window.google?.accounts?.oauth2) return Promise.resolve();
-  return new Promise((res, rej) => {
-    const s = document.createElement('script');
-    s.src = 'https://accounts.google.com/gsi/client'; s.async = true;
-    s.onload = () => res(); s.onerror = () => rej(new Error('Could not reach Google sign-in. Are you offline?'));
-    document.head.append(s);
-  });
+const PEND = 'gcal-pending', REDIRECT = () => location.origin + location.pathname.replace(/[^/]*$/, '');
+const rnd = () => [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, '0')).join('');
+/** Google's sign-in address (the "implicit" browser flow: the access token comes back in the page address). Works on every browser,
+ *  including phones and installed apps, because it is a normal page visit and needs no popup. `hint` picks a known account. */
+function authUrl({ hint, silent, state }) {
+  const id = clientId();
+  if (!id) throw new Error('Google sign-in is not set up in this copy of the app. Add a client ID under Settings → Accounts → Repository, token and Google client ID.');
+  const q = new URLSearchParams({ client_id: id, redirect_uri: REDIRECT(), response_type: 'token', scope: SCOPE, include_granted_scopes: 'true', state });
+  if (hint) q.set('login_hint', hint);
+  if (silent) q.set('prompt', 'none'); else if (!hint) q.set('prompt', 'select_account');
+  return 'https://accounts.google.com/o/oauth2/v2/auth?' + q;
 }
-/** Asks Google for an access token. `hint` picks a known account; without it Google shows its account chooser. */
-async function token({ hint, silent } = {}) {
-  const clientId_ = clientId();
-  if (!clientId_) throw new Error('Google sign-in is not set up in this copy of the app. Add a client ID under Settings → Accounts → Repository, token and Google client ID.');
-  await loadGis();
-  return new Promise((res, rej) => {
-    const tc = window.google.accounts.oauth2.initTokenClient({
-      client_id: clientId_, scope: SCOPE,
-      callback: r => r.error ? rej(new Error(r.error_description || r.error)) : res({ token: r.access_token, exp: Date.now() + Math.max(60, (+r.expires_in || 3600) - 60) * 1000 }),
-      error_callback: e => rej(new Error(e?.type === 'popup_closed' ? 'Sign-in was cancelled.' : e?.message || 'Google sign-in failed')),
-    });
-    tc.requestAccessToken({ prompt: silent ? 'none' : hint ? '' : 'select_account', ...(hint ? { hint } : {}) });
-  });
-}
+const fromHash = hash => { const q = new URLSearchParams(hash.replace(/^#/, '')); return { state: q.get('state'), error: q.get('error'), token: q.get('access_token'), exp: Date.now() + Math.max(60, (+q.get('expires_in') || 3600) - 60) * 1000 }; };
 
 async function call(tok, path, { method = 'GET', body, headers } = {}) {
   const r = await fetch(API + path, { method, headers: { Authorization: 'Bearer ' + tok, ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined });
@@ -72,24 +62,51 @@ const toCalendars = (items, old = []) => {
 };
 const LIST = '/users/me/calendarList?fields=items(id,summary,primary,backgroundColor,selected,accessRole)';
 
-/** Opens Google's popup (call from a click). Adds the account, or refreshes it when it is already known. Returns its email. */
-export async function connect(hint) {
-  const t = await token({ hint });
+async function addFromToken(t, hint) {
   const items = (await (await call(t.token, LIST)).json()).items || [];
   const email = items.find(c => c.primary)?.id || hint;
   if (!email) throw new Error('Google did not say which account this is.');
   const s = read(), old = s.accounts.find(a => a.email === email);
-  const next = { email, ...t, calendars: toCalendars(items, old?.calendars) };
+  const next = { email, token: t.token, exp: t.exp, calendars: toCalendars(items, old?.calendars) };
   s.accounts = old ? s.accounts.map(a => a.email === email ? next : a) : [...s.accounts, next];
   write(s); return email;
 }
-/** Quietly renews an expired token when Google still has the session. Never throws. */
-export async function renew(email) {
-  try { const t = await token({ hint: email, silent: true }); patchAccount(email, a => ({ ...a, ...t })); return true; } catch { return false; }
+/** Leaves for Google's sign-in page (call from a click); Google sends the person back to the app, where finishSignIn() adds the account.
+ *  Adds a new account (account chooser) or, with `hint`, signs a known one in again. Never returns. */
+export function connect(hint) {
+  const state = rnd(), url = authUrl({ hint, state });
+  ls.set(PEND, { state, hint: hint || '', t: Date.now() });
+  location.assign(url);
+  return new Promise(() => {});
+}
+/** Call once at startup: when the page was opened by Google's redirect, takes the token from the address. Resolves to {email} or {error}, or null. */
+export async function finishSignIn() {
+  if (!/[#&](access_token|error)=/.test(location.hash)) return null;
+  const r = fromHash(location.hash), pend = ls.get(PEND, null);
+  history.replaceState(null, '', location.pathname + location.search);
+  if (!pend || pend.state !== r.state || Date.now() - pend.t > 1800000) return null;
+  localStorage.removeItem(PEND);
+  if (r.error || !r.token) return { error: r.error === 'access_denied' ? 'Sign-in was cancelled.' : `Google sign-in failed (${r.error || 'no token'}).` };
+  try { return { email: await addFromToken(r, pend.hint) }; } catch (e) { return { error: e.message }; }
+}
+/** Quietly renews an expired token in a hidden frame when Google still has the session (not possible in every browser). Never throws. */
+export function renew(email) {
+  return new Promise(res => {
+    let state, f; try { state = rnd(); f = document.createElement('iframe'); f.hidden = true; f.setAttribute('aria-hidden', 'true'); f.src = authUrl({ hint: email, silent: true, state }); } catch { return res(false); }
+    const end = ok => { clearTimeout(t); removeEventListener('message', on); f.remove(); res(ok); };
+    const on = e => {
+      if (e.origin !== location.origin || e.source !== f.contentWindow || typeof e.data?.gcal !== 'string') return;
+      const r = fromHash(e.data.gcal);
+      if (r.state !== state || !r.token) return end(false);
+      patchAccount(email, a => ({ ...a, token: r.token, exp: r.exp })); end(true);
+    };
+    const t = setTimeout(() => end(false), 8000);
+    addEventListener('message', on); document.body.append(f);
+  });
 }
 export async function disconnect(email) {
   const a = account(email);
-  if (a?.token && live(a)) { try { await loadGis(); window.google.accounts.oauth2.revoke(a.token, () => {}); } catch { /* offline: the token expires by itself within the hour */ } }
+  if (a?.token && live(a)) { try { await fetch('https://oauth2.googleapis.com/revoke', { method: 'POST', mode: 'no-cors', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'token=' + encodeURIComponent(a.token) }); } catch { /* offline: the token expires by itself within the hour */ } }
   const s = read(); s.accounts = s.accounts.filter(x => x.email !== email); write(s);
   const c = ls.get(CACHE, {}); for (const k of Object.keys(c)) if (k.startsWith(email + '|')) delete c[k]; ls.set(CACHE, c);
 }

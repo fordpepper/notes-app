@@ -52,7 +52,7 @@ const pickFile = accept => new Promise(res => {
 const download = (name, text) => { const a = h('a', { href: URL.createObjectURL(new Blob([text], { type: 'application/json' })), download: name }); document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); };
 
 /** ctx: { onWiped(): the local copy was erased, onConnected(): connection saved } */
-export function openSettings(first, ctx) {
+export function openSettings(first, ctx, { accounts = false } = {}) {
   const old = G.getCfg() || null, cfg = old || {};
   return modal((d, close) => {
     const field = (label, input, hint) => h('label', { class: 'field' }, label, input, hint && h('small', {}, hint));
@@ -183,7 +183,7 @@ export function openSettings(first, ctx) {
       h('div', { class: 'mbody' },
         h('h3', {}, first ? 'Connect your notes repo' : 'Settings'),
         first && h('p', {}, 'Notes stay on this device and sync with a GitHub repo. You can skip this and use the app offline for now.'),
-        h('details', { class: 'sect', open: !G.configured() || first },
+        h('details', { class: 'sect', open: !G.configured() || first || accounts },
           h('summary', {}, 'Accounts', accSum),
           h('div', { class: 'group' },
             accRows,
