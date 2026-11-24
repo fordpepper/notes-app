@@ -98,9 +98,10 @@ export async function finishSignIn() {
   history.replaceState(null, '', location.pathname + location.search);
   if (!pend || pend.state !== r.state || Date.now() - pend.t > 1800000) return null;
   localStorage.removeItem(PEND);
+  const quiet = !!ls.get(AUTO, null)?.quiet;
   if (r.error || !r.token) localStorage.removeItem(AUTO);
-  if (r.error || !r.token) return { error: r.error === 'access_denied' ? 'Sign-in was cancelled.' : `Google sign-in failed (${r.error || 'no token'}).` };
-  try { return { email: await addFromToken(r, pend.hint) }; } catch (e) { return { error: e.message }; }
+  if (r.error || !r.token) return { quiet, error: r.error === 'access_denied' ? 'Sign-in was cancelled.' : `Google sign-in failed (${r.error || 'no token'}).` };
+  try { return { quiet, email: await addFromToken(r, pend.hint) }; } catch (e) { return { error: e.message }; }
 }
 /** Quietly renews an expired token in a hidden frame when Google still has the session (not possible in every browser). Never throws. */
 export function renew(email) {
@@ -170,3 +171,10 @@ export const applySynced = o => {
   const cur = read(), by = new Map(cur.accounts.map(a => [a.email, a]));
   write({ clientId: o?.clientId || '', accounts: (o?.accounts || []).map(a => ({ token: '', exp: 0, ...by.get(a.email), email: a.email, calendars: a.calendars || [] })) });
 };
+/** Accounts that arrived from another device: sign them in by the same quick round trip as after an import (Google already knows the permission). Returns true when it leaves the page. */
+export function signInArrived(emails) {
+  const e = emails.filter(x => account(x) && !live(account(x)));
+  if (!e.length) return false;
+  ls.set(AUTO, { list: e, t: Date.now(), quiet: true });
+  return autoSignIn();
+}

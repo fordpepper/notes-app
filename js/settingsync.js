@@ -23,14 +23,17 @@ export function initSettingsSync({ onApplied }) {
     const remote = M.getSettings();
     if (!remote) return;
     if (remote.t <= ls.get('settings-t', 0) || same(remote.data, snap())) { if (remote.t > ls.get('settings-t', 0)) ls.set('settings-t', remote.t); return; }
+    let arrived = [];
     applying = true;
     try {
       const d = remote.data;
       if (d.prefs) { for (const k of Object.keys(prefs)) delete prefs[k]; Object.assign(prefs, d.prefs); savePrefs(); applyPrefs(); }
-      if (d.gcal) GC.applySynced(d.gcal);
+      if (d.gcal) { arrived = (d.gcal.accounts || []).map(a => a.email).filter(e => !GC.account(e)); GC.applySynced(d.gcal); }
       ls.set('settings-t', remote.t);
     } finally { applying = false; }
     onApplied?.();
+    // a new account from another device signs itself in (one quick visit to Google), unless you're in the middle of typing
+    if (arrived.length && navigator.onLine && !document.activeElement?.matches?.('textarea, input')) GC.signInArrived(arrived);
   };
   const schedule = () => { clearTimeout(timer); timer = setTimeout(() => push().catch(console.warn), 1500); };
   document.addEventListener('settings-local', () => { if (!applying) { ls.set('settings-t', Date.now()); schedule(); } });

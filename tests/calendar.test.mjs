@@ -239,15 +239,17 @@ ok('an .ics file (Apple Calendar export) can be imported', true);
 await nd.ctx.close();
 
 // ---- settings follow the repo: a third device that only connects to the repo gets colours and accounts, never tokens
-const th = await session({ width: 1280, height: 900 }, { google: false });
+const th = await session({ width: 1280, height: 900 });
 await th.p.waitForFunction(() => JSON.parse(localStorage.prefs || '{}').palette === 'violet', null, { timeout: 15000 }).catch(() => {});
 const got = await th.p.evaluate(() => ({ pal: JSON.parse(localStorage.prefs).palette, g: JSON.parse(localStorage.gcal || '{}') }));
 ok('colours and Google accounts arrive through the repo', got.pal === 'violet' && (got.g.accounts || []).map(a => a.email).join() === 'me@gmail.com', JSON.stringify(got));
-ok('…without any token', (got.g.accounts || []).every(a => !a.token) && !JSON.stringify(gh.dump?.() ?? '').includes('tok-'));
+ok('the repo itself holds no token', !/tok-|access_token/.test(gh.text('.notes-app.json')));
+await th.p.waitForFunction(() => JSON.parse(localStorage.gcal || '{}').accounts?.[0]?.token, null, { timeout: 15000 }).catch(() => {});
+ok('the arrived account signs itself in on the new device (no button to press)', await th.p.evaluate(() => !!JSON.parse(localStorage.gcal).accounts[0].token));
 await th.ctx.close();
 
 // ---- phone
-const ph = await session({ width: 390, height: 800 }, { google: false });
+const ph = await session({ width: 390, height: 800 });
 await ph.p.evaluate(() => document.body.classList.add('nav-open')); await ph.p.click('#tabs button[data-view=calendar]'); await ph.p.waitForSelector('#cal .cd'); await ph.p.waitForTimeout(500);
 const pm = await ph.p.evaluate(() => { const s = document.querySelector('.cal-scroll'), w = document.querySelector('.cal-day'), g = document.querySelector('.cal-grid').getBoundingClientRect(); return { x: document.documentElement.scrollWidth <= innerWidth, nav: !document.body.classList.contains('nav-open'), scrolls: s.scrollHeight > s.clientHeight * 3, wide: s.scrollWidth <= s.clientWidth, dayBelow: w.getBoundingClientRect().top >= g.bottom - 1, wk: document.querySelector('.wk').getBoundingClientRect().height, head: document.querySelector('.cal-head').getBoundingClientRect().height <= 60 }; });
 ok('phone: weeks scroll up and down, no sideways scroll, day list underneath', pm.x && pm.nav && pm.scrolls && pm.wide && pm.dayBelow && pm.wk >= 50 && pm.head, JSON.stringify(pm));

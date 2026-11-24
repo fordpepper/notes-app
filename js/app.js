@@ -785,7 +785,7 @@ async function boot() {
   if (G.configured()) { G.sync(); schedulePoll(); }
   else if (!localStorage.getItem('welcomed')) { localStorage.setItem('welcomed', '1'); openSettings(true, settingsCtx); }
   $('#emptyConnect').hidden = G.configured();
-  if (signIn) { toast(signIn.email ? `Signed in as ${signIn.email}` : signIn.error); openSettings(false, settingsCtx, { accounts: true }); }
+  if (signIn) { toast(signIn.email ? `Signed in as ${signIn.email}` : signIn.error); if (!signIn.quiet) openSettings(false, settingsCtx, { accounts: true }); }
   requestAnimationFrame(() => requestAnimationFrame(() => document.body.classList.remove('booting')));
   const idle = window.requestIdleCallback || (f => setTimeout(f, 1500));
   idle(() => { setupServiceWorker(); T.prune(); });             // after first paint: nothing competes with startup
