@@ -43,7 +43,7 @@ const ok = (name, c, extra) => { console.log((c ? 'PASS ' : 'FAIL ') + name + (!
 const errors = [];
 const browser = await chromium.launch();
 async function setup(opts) {
-  const ctx = await browser.newContext(opts);
+  const ctx = await browser.newContext(opts); await ctx.addInitScript(() => localStorage.setItem('list', '"files"'));
   await ctx.route('https://api.github.com/**', async route => {
     const rq = route.request(), u = new URL(rq.url());
     const res = gh.handle(rq.method(), u.pathname, rq.headers(), rq.postData() ? JSON.parse(rq.postData()) : null);

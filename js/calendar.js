@@ -35,6 +35,7 @@ export function initCalendar(root, { openSettings }) {
   const fd = firstDay(), today = startOfDay(new Date());
   const weekStart = d => I.addDays(startOfDay(d), -((d.getDay() - fd + 7) % 7));
   let open = false, sel = today, first, nWeeks, wk = 100, lastSha = '', loading = 0, error = '', renewed = false;
+  const chipDay = new Map(); let spans = [];
   const byDay = new Map(), gdata = new Map(), loaded = new Map();
   let titleEl, subEl, scroller, weeksEl, panel, wdEl, hh = 28, raf = 0, ensureT = 0;
 
@@ -44,14 +45,17 @@ export function initCalendar(root, { openSettings }) {
     const from = first, to = I.addDays(first, nWeeks * 7), seen = new Set(), list = localEvents().flatMap(e => I.occurrences(e, from, to));
     for (const e of FD.events(from, to)) list.push(e);
     for (const [k, v] of gdata) if (activeG(k)) for (const e of v) { const id = `${e.acct}|${e.calId}|${e.id}|${e.start}`; if (!seen.has(id)) { seen.add(id); list.push(e); } }
-    byDay.clear();
+    byDay.clear(); chipDay.clear(); spans = [];
+    const put = (m, k, e) => (m.get(k) || m.set(k, []).get(k)).push(e);
     for (const e of list) {
       const s = e.start.slice(0, 10); let en = e.end.slice(0, 10);
       if (e.allDay || (e.end.slice(11) === '00:00' && en > s)) en = I.dkey(I.addDays(I.parseKey(en), -1));
       if (en < s) en = s;
-      for (let d = I.parseKey(s), n = 0; I.dkey(d) <= en && n < 400; d = I.addDays(d, 1), n++) { const k = I.dkey(d); (byDay.get(k) || byDay.set(k, []).get(k)).push(e); }
+      if (en > s) spans.push({ e, s, en });                                  // several days: drawn as one continuous bar
+      for (let d = I.parseKey(s), n = 0; I.dkey(d) <= en && n < 400; d = I.addDays(d, 1), n++) { const k = I.dkey(d); put(byDay, k, e); if (en === s) put(chipDay, k, e); }
     }
-    for (const l of byDay.values()) l.sort((a, b) => (b.allDay - a.allDay) || a.start.localeCompare(b.start));
+    for (const m of [byDay, chipDay]) for (const l of m.values()) l.sort((a, b) => (b.allDay - a.allDay) || a.start.localeCompare(b.start));
+    spans.sort((a, b) => a.s.localeCompare(b.s) || b.en.localeCompare(a.en));
   }
   const visibleRows = () => { const a = Math.max(0, Math.floor(scroller.scrollTop / wk)), b = Math.min(nWeeks - 1, Math.floor((scroller.scrollTop + scroller.clientHeight) / wk)); return [a, b]; };
 
@@ -149,13 +153,30 @@ export function initCalendar(root, { openSettings }) {
     return h('button', { type: 'button', class: 'ce' + (ev.allDay ? ' ad' : ''), style: `--c:${c}`, tabindex: '-1', title: `${ev.title}${ev.allDay ? '' : ' · ' + fmtTime(ev.start)}`, onclick: e => { e.stopPropagation(); editor(ev); } },
       !ev.allDay && h('span', { class: 't' }, fmtTime(ev.start)), h('span', { class: 'n' }, ev.title));
   }
-  function cell(day) {
-    const k = I.dkey(day), list = byDay.get(k) || [], cap = PHONE.matches ? 4 : Math.max(1, Math.floor((wk - 30) / 19)), shown = list.length > cap ? cap - 1 : list.length;
+  function cell(day, lanes = 0) {
+    const k = I.dkey(day), list = chipDay.get(k) || [], cap = PHONE.matches ? 4 : Math.max(1, Math.floor((wk - 30) / 19)), room = Math.max(1, cap - lanes), shown = list.length > room ? room - 1 : list.length;
     const label = day.getDate() === 1 ? day.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : String(day.getDate());
     return h('div', { class: 'cd' + (day.getMonth() % 2 ? ' odd' : '') + (sameDay(day, today) ? ' today' : '') + (sameDay(day, sel) ? ' sel' : ''), role: 'gridcell', 'data-k': k, 'aria-label': day.toDateString(), 'aria-selected': String(sameDay(day, sel)) },
       h('span', { class: 'dn' }, label), h('div', { class: 'cs' }, list.slice(0, shown).map(chip), list.length > shown && h('span', { class: 'more' }, `${list.length - shown} more`)));
   }
-  const weekRow = i => h('div', { class: 'wk', role: 'row' }, Array.from({ length: 7 }, (_, d) => cell(I.addDays(first, i * 7 + d))));
+  /** Multi-day events of one week: each gets a lane and spans its columns, joined to the neighbouring weeks. */
+  function bars(w0) {
+    const a = I.dkey(w0), b = I.dkey(I.addDays(w0, 6)), col = k => Math.round((I.parseKey(k) - w0) / 86400000), ends = [], out = [];
+    const cap = PHONE.matches ? 4 : Math.max(1, Math.floor((wk - 30) / 19));
+    for (const { e, s, en } of spans) {
+      if (en < a || s > b) continue;
+      const c0 = Math.max(0, col(s)), c1 = Math.min(6, col(en));
+      let l = ends.findIndex(x => x < c0); if (l < 0) l = ends.length; ends[l] = c1;
+      if (l < Math.max(1, cap - 1)) out.push({ e, l, c0, c1, cl: s < a, cr: en > b });
+    }
+    return out;
+  }
+  function weekRow(i) {
+    const w0 = I.addDays(first, i * 7), bs = bars(w0), lanes = bs.reduce((m, x) => Math.max(m, x.l + 1), 0);
+    return h('div', { class: 'wk', role: 'row', style: `--lanes:${lanes}` }, Array.from({ length: 7 }, (_, d) => cell(I.addDays(w0, d), lanes)),
+      bs.map(({ e, l, c0, c1, cl, cr }) => h('button', { type: 'button', class: 'sp' + (e.allDay ? ' ad' : '') + (cl ? ' cl' : '') + (cr ? ' cr' : ''), tabindex: '-1', title: e.title,
+        style: `--c:${e.color || 'var(--primary)'};--l:${l};--c0:${c0};--n:${c1 - c0 + 1}`, onclick: ev => { ev.stopPropagation(); editor(e); } }, h('span', {}, e.title))));
+  }
 
   function rebuild() {
     if (!open || !weeksEl) return;
@@ -244,7 +265,7 @@ export function initCalendar(root, { openSettings }) {
       h('div', { class: 'cal-main' }, h('div', { class: 'cal-grid' }, scroller), panel));
     scroller.addEventListener('scroll', () => { if (!raf) raf = requestAnimationFrame(scrolled); }, { passive: true });
     weeksEl.addEventListener('click', e => { const c = e.target.closest('.cd'); if (c) select(I.parseKey(c.dataset.k)); });
-    weeksEl.addEventListener('dblclick', e => { const c = e.target.closest('.cd'); if (c && !e.target.closest('.ce')) editor(null, I.parseKey(c.dataset.k)); });
+    weeksEl.addEventListener('dblclick', e => { const c = e.target.closest('.cd'); if (c && !e.target.closest('.ce, .sp')) editor(null, I.parseKey(c.dataset.k)); });
     scroller.addEventListener('keydown', e => {
       const step = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 }[e.key];
       if (!step) return;

@@ -57,7 +57,7 @@ gh.seed({
 let fails = 0; const errors = [];
 const ok = (name, c, extra) => { console.log((c ? 'PASS ' : 'FAIL ') + name + (!c && extra ? '  ' + extra : '')); if (!c) fails++; };
 const browser = await launcher.launch();
-const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } }); await ctx.addInitScript(() => localStorage.setItem('list', '"files"'));
 await ctx.route('https://api.github.com/**', async route => {
   const rq = route.request(), u = new URL(rq.url());
   const res = gh.handle(rq.method(), u.pathname, rq.headers(), rq.postData() ? JSON.parse(rq.postData()) : null);

@@ -85,13 +85,14 @@ const until = async (f, ms = 4000) => { for (let t = 0; t < ms; t += 100) { if (
 const closeSettings = p => p.click('dialog button:has-text("Close")');
 
 const { p, ctx } = await session({ width: 1280, height: 900 });
-ok('sidebar is clean: search, new, menu, tabs, status', await p.locator('#side button:visible').evaluateAll(b => b.map(x => x.id || x.dataset.view)).then(l => l.filter(Boolean).join(',') === 'btnNote,btnSide,notes,calendar'));
+ok('sidebar is clean: search, new, menu, tabs, status', await p.locator('#side button:visible').evaluateAll(b => b.map(x => x.id || x.dataset.view)).then(l => l.filter(Boolean).join(',') === 'btnNote,btnSide,notes,files,calendar'));
 ok('no sync button is shown twice (menu has no Sync now)', await (async () => { await p.click('#btnSide'); const t = await p.locator('#menu button').allInnerTexts(); await p.keyboard.press('Escape'); return !t.some(x => /Sync/.test(x)); })());
 await p.click('#tabs button[data-view=calendar]'); await p.waitForSelector('#cal .cd');
 await p.waitForTimeout(400);
 ok('calendar is a long run of weeks, not one month', await p.locator('#cal .wk').count() >= 60);
 ok('title is the current month and today is on screen', (await title(p)).toLowerCase().includes(monthName(now)) && await p.locator('#cal .cd.today').evaluate(e => { const r = e.getBoundingClientRect(), s = document.querySelector('.cal-scroll').getBoundingClientRect(); return r.top >= s.top && r.bottom <= s.bottom; }));
-ok('ICS events from the repo show up (timed, multi-day, repeating)', (await chips(p)).filter(t => t === 'Dentist').length === 1 && (await chips(p)).filter(t => t === 'Trip').length === 2 && (await chips(p)).filter(t => t === 'Weekly run').length >= 3);
+ok('a multi-day event is one continuous bar across its days', await p.locator('#cal .sp:has-text("Trip")').evaluate(b => { const c = b.parentElement.querySelector('.cd').getBoundingClientRect().width, w = b.getBoundingClientRect().width; return Math.abs(w - 2 * c) < 6 && b.getBoundingClientRect().height > 10; }));
+ok('ICS events from the repo show up (timed, multi-day, repeating)', (await chips(p)).filter(t => t === 'Dentist').length === 1 && (await chips(p)).filter(t => t === 'Trip').length === 0 && await p.locator('#cal .sp:has-text("Trip")').count() === 1 && (await chips(p)).filter(t => t === 'Weekly run').length >= 3);
 ok('linked calendars (secret iCal address) show read-only events; EXDATE and cancelled are honoured', (await chips(p)).filter(t => t === 'Feed meeting').length === 1 && (await chips(p)).filter(t => t === 'Feed daily').length === 4 && !(await chips(p)).includes('Feed cancelled'), (await chips(p)).join('|'));
 ok('calendar view has only Today and Event buttons, no account buttons', (await p.locator('#cal .cal-head button:visible').allInnerTexts()).map(s => s.trim()).join(',') === 'Today,Event' && await p.locator('#cal button:has-text("Google"), #cal button:has-text("Connect"), #cal button:has-text("account")').count() === 0);
 await p.screenshot({ path: `${SHOTS}/c1-month.png` });
@@ -137,7 +138,7 @@ await hasChip(p, 'Dentist (moved)');
 await p.locator('#cal .cd .ce:has(.n:text-is("Dentist (moved)"))').click(); await p.click('dialog.evdlg .evdel'); await p.click('dialog:has(h3:text("Delete this event?")) .danger');
 await noChip(p, 'Dentist (moved)');
 ok('events can be edited and deleted', true);
-await p.click('#tabs button[data-view=notes]'); await p.click('.row .name:text-is("Notes")');
+await p.click('#tabs button[data-view=files]'); await p.click('.row .name:text-is("Notes")');
 ok('switching back to notes works', await p.locator('#cal').isHidden() && (await p.inputValue('#ed')) === 'hello');
 
 // ---- settings: accounts block

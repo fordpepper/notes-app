@@ -23,7 +23,7 @@ const browser = await chromium.launch();
 async function session(connection, files) {
   const gh = createMock(); gh.seed({ 'Notes.txt': 'hello', 'Trip.md': '# Trip\n\n![x](pic.png)\n', 'pic.png': png, 'data.bin': Buffer.alloc(3000, 7) });
   const blobGets = [];
-  const ctx = await browser.newContext({ viewport: { width: 1100, height: 800 } });
+  const ctx = await browser.newContext({ viewport: { width: 1100, height: 800 } }); await ctx.addInitScript(() => localStorage.setItem('list', '"files"'));
   await ctx.route('https://api.github.com/**', async route => {
     const rq = route.request(), u = new URL(rq.url());
     if (/\/git\/blobs\//.test(u.pathname) && rq.method() === 'GET') blobGets.push(u.pathname.split('/').pop());

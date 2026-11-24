@@ -51,7 +51,7 @@ const idle = (page, ms = 8000) => page.waitForFunction(() => document.querySelec
 const browser = await launcher.launch();
 
 /* ============================== DESKTOP ============================== */
-const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } }); await ctx.addInitScript(() => localStorage.setItem('list', '"files"'));
 await mockGitHub(ctx);
 const page = await ctx.newPage(); watch(page);
 const vendorRequests = []; page.on('request', r => /\/vendor\//.test(r.url()) && vendorRequests.push(r.url()));
@@ -185,7 +185,8 @@ await page.click('#status'); await idle(page, 10000);
 ok('queued edit pushed once online', gh.text('Shopping list.txt').endsWith('bread'));
 
 /* ============================== AUTO-UPDATE ============================== */
-const up = await (await browser.newContext({ viewport: { width: 1280, height: 800 } })).newPage(); watch(up);
+const upc = await browser.newContext({ viewport: { width: 1280, height: 800 } }); await upc.addInitScript(() => localStorage.setItem('list', '"files"'));
+const up = await upc.newPage(); watch(up);
 await up.context().route('https://api.github.com/**', r => r.abort());
 build = 'build-one';
 await up.goto(URL0); await up.waitForSelector('#btnNote');
@@ -204,7 +205,7 @@ ok('new CSS is served after the update', (await up.evaluate(() => fetch('style.c
 await up.context().close();
 
 /* ============================== PHONE ============================== */
-const mctx = await browser.newContext({ viewport: { width: 390, height: 800 }, hasTouch: true, isMobile: true, colorScheme: 'dark' });
+const mctx = await browser.newContext({ viewport: { width: 390, height: 800 }, hasTouch: true, isMobile: true, colorScheme: 'dark' }); await mctx.addInitScript(() => localStorage.setItem('list', '"files"'));
 await mockGitHub(mctx);
 await mctx.addInitScript(() => { if (!localStorage.getItem('cfg')) { localStorage.setItem('cfg', JSON.stringify({ token: 't', owner: 'me', repo: 'notes', branch: '', root: '' })); localStorage.setItem('welcomed', '1'); } });
 const m = await mctx.newPage(); watch(m);

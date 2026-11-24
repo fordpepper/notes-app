@@ -15,7 +15,7 @@ const MAX_FILE = 25 * 1024 * 1024;   // keep uploads phone- and API-friendly
 
 /* ---------------------------------------------------------------- state */
 const S = {
-  view: 'notes', current: null, dir: '', q: '', kind: null, shownSha: null,
+  view: ls.get('list', 'notes') === 'files' ? 'files' : 'notes', list: ls.get('list', 'notes') === 'files' ? 'files' : 'notes', current: null, dir: '', q: '', kind: null, shownSha: null,
   mode: ls.get('mode', 'edit'), altMode: 'preview',     // view mode for markdown / for other previewable text (csv, json, code…)
   expanded: new Set(ls.get('expanded', [])),
   fresh: null,                       // path of a just-created, still-untouched note (discarded if left empty)
@@ -87,16 +87,34 @@ function row({ type, path, depth, name, ico, active, open }) {
 }
 function toggleDir(path) { S.dir = path; S.expanded.has(path) ? S.expanded.delete(path) : S.expanded.add(path); saveExpanded(); renderTree(); }
 
+/** Notes tab: every note, newest first, as a flat list (the Files tab has the folders and everything else). */
+function renderNotes() {
+  const el = $('#tree'), keep = el.scrollTop, frag = document.createDocumentFragment();
+  el.setAttribute('role', 'tree');
+  const all = [...M.files.values()].filter(r => !r.deleted && U.isNote(r.path) && !U.isHidden(r.path) && r.path !== 'calendar.ics');
+  const pins = new Set(M.getPins());
+  all.sort((a, b) => (pins.has(b.path) - pins.has(a.path)) || (b.mtime || 0) - (a.mtime || 0) || U.naturalCmp(a.path, b.path));
+  for (const r of all) {
+    const rw = row({ type: 'file', path: r.path, depth: 0, name: displayName(r.path), ico: pins.has(r.path) ? 'star' : fileIcon(r.path), active: r.path === S.current });
+    rw.firstChild.remove();
+    const d = U.dirname(r.path); if (d) { rw.classList.add('two'); rw.querySelector('.name').append(h('small', {}, d)); }
+    frag.append(rw);
+  }
+  if (!all.length) frag.append(h('div', { class: 'empty-tree' }, !G.configured() ? 'No notes yet. Create one, or connect GitHub in Settings to load your repo.' : G.status.state === 'syncing' ? (G.status.msg || 'Syncing your notes…') : 'No notes yet. Tap “New note” to start.'));
+  el.replaceChildren(frag); el.scrollTop = keep;
+}
+
 function renderTree() {
   const el = $('#tree');
   if (S.q) return renderSearch(el);
+  if (S.list === 'notes') return renderNotes();
   const keep = el.scrollTop, frag = document.createDocumentFragment();
   el.setAttribute('role', 'tree');
   const pins = M.getPins().filter(M.exists);
   if (pins.length) {
     frag.append(h('div', { class: 'sec' }, 'Pinned'));
     for (const p of pins) frag.append(row({ type: 'file', path: p, depth: 0, name: displayName(p), ico: fileIcon(p), active: p === S.current }));
-    frag.append(h('div', { class: 'sec' }, 'Notes'));
+    frag.append(h('div', { class: 'sec' }, 'Files'));
   }
   const walk = (n, depth) => {
     for (const d of [...n.dirs.values()].sort((a, b) => U.naturalCmp(a.name, b.name))) {
@@ -183,7 +201,7 @@ function renderSearch(el) {
 
 /* ---------------------------------------------------------------- file operations */
 async function openFile(path) {
-  if (S.view === 'calendar') await setView('notes');
+  if (S.view === 'calendar') await setView(S.list);
   await flush();
   if (!M.exists(path)) return;
   await discardFresh(path);
@@ -638,15 +656,20 @@ M.subscribe(kind => {
 
 /* ---------------------------------------------------------------- notes / calendar views */
 let calCtl = null;
+function markTabs() {
+  document.body.dataset.view = S.view;
+  for (const t of document.querySelectorAll('#tabs button')) { const on = t.dataset.view === S.view; t.classList.toggle('on', on); t.setAttribute('aria-selected', String(on)); }
+}
+markTabs();
 async function setView(v) {
   if (v === S.view) { if (v === 'calendar' && narrow.matches) closeNav(); return; }
-  S.view = v; document.body.dataset.view = v;
-  for (const t of document.querySelectorAll('#tabs button')) { const on = t.dataset.view === v; t.classList.toggle('on', on); t.setAttribute('aria-selected', String(on)); }
+  S.view = v; if (v !== 'calendar') { S.list = v; ls.set('list', v); }
+  markTabs();
   if (v === 'calendar') {
     await flush();
     if (!calCtl) { const { initCalendar } = await import('./calendar.js'); calCtl = initCalendar($('#cal'), { openSettings: () => openSettings(false, settingsCtx) }); }
     calCtl.show(); if (narrow.matches) closeNav();
-  } else calCtl?.hide();
+  } else { calCtl?.hide(); renderTree(); }
 }
 
 /* ---------------------------------------------------------------- global UI wiring */
