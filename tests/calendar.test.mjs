@@ -198,7 +198,8 @@ ok('…which opens Settings where the Sign in button is', await p.locator('.acct
 await closeSettings(p);
 
 // ---- export + import (one encrypted file)
-await p.evaluate(() => { const pr = JSON.parse(localStorage.prefs); pr.palette = 'violet'; localStorage.prefs = JSON.stringify(pr); });
+await p.waitForTimeout(3000);
+await openMenu(p, 'Settings'); await p.click('dialog .pal[data-id=violet]'); await p.waitForTimeout(3500); await closeSettings(p);
 await p.reload(); await p.waitForSelector('.row.file'); await settings(p);
 await p.click('dialog button:has-text("Export settings")'); await p.waitForSelector('dialog:has(h3:text("Export settings"))');
 await p.fill('dialog:has(h3:text("Export settings")) input[placeholder="Passphrase"]', 'short'); await p.fill('dialog:has(h3:text("Export settings")) input[placeholder="Repeat passphrase"]', 'short'); await p.click('dialog:has(h3:text("Export settings")) .primary');
@@ -236,6 +237,14 @@ await nd.p.waitForSelector('#toast.show'); await closeSettings(nd.p);
 await nd.p.click('#tabs button[data-view=calendar]'); await hasChip(nd.p, 'From Apple');
 ok('an .ics file (Apple Calendar export) can be imported', true);
 await nd.ctx.close();
+
+// ---- settings follow the repo: a third device that only connects to the repo gets colours and accounts, never tokens
+const th = await session({ width: 1280, height: 900 }, { google: false });
+await th.p.waitForFunction(() => JSON.parse(localStorage.prefs || '{}').palette === 'violet', null, { timeout: 15000 }).catch(() => {});
+const got = await th.p.evaluate(() => ({ pal: JSON.parse(localStorage.prefs).palette, g: JSON.parse(localStorage.gcal || '{}') }));
+ok('colours and Google accounts arrive through the repo', got.pal === 'violet' && (got.g.accounts || []).map(a => a.email).join() === 'me@gmail.com', JSON.stringify(got));
+ok('…without any token', (got.g.accounts || []).every(a => !a.token) && !JSON.stringify(gh.dump?.() ?? '').includes('tok-'));
+await th.ctx.close();
 
 // ---- phone
 const ph = await session({ width: 390, height: 800 }, { google: false });

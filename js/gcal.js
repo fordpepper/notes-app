@@ -15,7 +15,7 @@ function read() {
   }
   return { clientId: s.clientId || '', accounts: s.accounts };
 }
-const write = s => ls.set(KEY, s);
+const write = s => { ls.set(KEY, s); document.dispatchEvent(new Event('settings-local')); };
 const patchAccount = (email, fn) => { const s = read(); s.accounts = s.accounts.map(a => a.email === email ? fn(a) : a); write(s); };
 
 export const state = read;
@@ -165,3 +165,8 @@ const path = (calId, id) => `/calendars/${encodeURIComponent(calId)}/events${id 
 export async function create(email, calId, ev) { const j = await (await api(email, path(calId), { method: 'POST', body: body(ev) })).json(); forget(); return j; }
 export async function update(ev) { const j = await (await api(ev.acct, path(ev.calId, ev.id), { method: 'PATCH', body: body({ ...ev, rrule: undefined }) })).json(); forget(); return j; }
 export async function remove(ev) { await api(ev.acct, path(ev.calId, ev.id), { method: 'DELETE' }); forget(); }
+/** Accounts and calendar choices arriving from the repo (no tokens: a device keeps its own sign-ins and renews quietly). */
+export const applySynced = o => {
+  const cur = read(), by = new Map(cur.accounts.map(a => [a.email, a]));
+  write({ clientId: o?.clientId || '', accounts: (o?.accounts || []).map(a => ({ token: '', exp: 0, ...by.get(a.email), email: a.email, calendars: a.calendars || [] })) });
+};

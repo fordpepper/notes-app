@@ -8,6 +8,7 @@ import { $, h, debounce, ls, toast, stamp, mdUrl, fmtSize } from './dom.js';
 import { icon } from './icons.js';
 import { promptText, confirmBox, pickFolder, showMenu, hideMenu } from './dialogs.js';
 import { prefs, applyPrefs } from './theme.js';
+import { initSettingsSync } from './settingsync.js';
 import { openSettings } from './settings.js';
 import { openAllFiles } from './alltree.js';
 
@@ -775,6 +776,7 @@ async function boot() {
     if (g.autoSignIn()) return;                     // right after "Import settings": signs the imported accounts in, one visit to Google each
   }
   await M.load();
+  initSettingsSync({ onApplied: () => { renderTree(); calCtl?.reloadGoogle?.(); calCtl?.render?.(); } });
   const launched = await handleLaunch();
   const last = ls.get('last', null);
   if (!launched && last && M.exists(last)) { S.current = last; S.dir = U.dirname(last); await showFile(last); }

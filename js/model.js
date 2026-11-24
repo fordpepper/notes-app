@@ -130,15 +130,20 @@ export async function resolveKind(path) {
 }
 
 // ---- pins (stored in the repo so they sync between devices) ----
-export function getPins() {
+const readApp = () => {
   const r = files.get(PINS);
-  if (!r || r.deleted || typeof r.content !== 'string') return [];
-  try { const p = JSON.parse(r.content).pins; return Array.isArray(p) ? p : []; } catch { return []; }
-}
-export async function setPins(arr) {
-  const text = JSON.stringify({ pins: arr }, null, 2) + '\n';
+  if (!r || r.deleted || typeof r.content !== 'string') return {};
+  try { const o = JSON.parse(r.content); return o && typeof o === 'object' ? o : {}; } catch { return {}; }
+};
+async function writeApp(o) {
+  const text = JSON.stringify(o, null, 2) + '\n';
   if (exists(PINS)) await saveText(PINS, text); else await create(PINS, text);
 }
+export function getPins() { const p = readApp().pins; return Array.isArray(p) ? p : []; }
+export const setPins = arr => writeApp({ ...readApp(), pins: arr });
+/** App settings (colours, Google accounts without tokens…) live in the same repo file, so every device gets them. */
+export const getSettings = () => { const s = readApp().settings; return s && typeof s === 'object' && s.data ? s : null; };
+export const setSettings = s => writeApp({ ...readApp(), pins: getPins(), settings: s });
 async function prunePins() {
   const pins = getPins(), keep = pins.filter(exists);
   if (keep.length !== pins.length) await setPins(keep);
@@ -163,7 +168,7 @@ export function buildTree(showHidden = false) {
       n = d;
     }
     const name = parts[parts.length - 1];
-    if (n && (showHidden || !name.startsWith('.'))) n.files.push(r);
+    if (n && r.path !== PINS && (showHidden || !name.startsWith('.'))) n.files.push(r);   // the app's own settings file stays out of sight
   }
   return root;
 }

@@ -59,7 +59,7 @@ pushed as **one commit**. If both sides changed the same file, the remote versio
 `name (conflict YYYY-MM-DD).txt`: nothing is overwritten. Edits are pushed ~3 s after you stop typing, immediately when you
 leave the app, and on Ctrl+S / the sync button / pull-down. *Settings → Full resync* re-checks everything if something looks off.
 
-Notes: empty folders are stored as a `.gitkeep`; pins live in `.notes-app.json` (so they sync); dot-files are hidden but synced;
+Notes: empty folders are stored as a `.gitkeep`; pins, colours, preferences and the list of Google accounts (never tokens) live in `.notes-app.json` (so they sync to every device); dot-files are hidden but synced;
 attachments go in an `attachments/` folder beside the note (move them along if you move the note); GitHub limits files to 100 MB.
 
 ## Development

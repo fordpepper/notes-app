@@ -37,7 +37,7 @@ if (prefs.v < 4) {
   if (hit) prefs.palette = hit[0]; else if (prefs.accent) { prefs.palette = 'custom'; prefs.seeds = [prefs.accent, '', '']; }
   delete prefs.accent; prefs.v = 4; ls.set('prefs', prefs);
 }
-export const savePrefs = () => ls.set('prefs', prefs);
+export const savePrefs = () => { ls.set('prefs', prefs); document.dispatchEvent(new Event('settings-local')); };
 
 /* ---------------- colour maths (OKLCH) ---------------- */
 const rgb = c => [1, 3, 5].map(i => parseInt(c.slice(i, i + 2), 16) / 255);
