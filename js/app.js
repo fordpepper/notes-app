@@ -745,7 +745,12 @@ async function boot() {
   $('#q').addEventListener('input', debounce(e => { S.q = e.target.value.trim(); renderTree(); }, 120));
   $('#q').addEventListener('keydown', e => { if (e.key === 'Escape') { e.target.value = ''; S.q = ''; renderTree(); } });
 
-  const signIn = /[#&](access_token|error)=/.test(location.hash) ? await import('./gcal.js').then(g => g.finishSignIn()) : null;
+  let signIn = null;
+  if (/[#&](access_token|error)=/.test(location.hash) || localStorage.getItem('gcal-auto')) {
+    const g = await import('./gcal.js');
+    if (/[#&](access_token|error)=/.test(location.hash)) signIn = await g.finishSignIn();
+    if (g.autoSignIn()) return;                     // right after "Import settings": signs the imported accounts in, one visit to Google each
+  }
   await M.load();
   const launched = await handleLaunch();
   const last = ls.get('last', null);

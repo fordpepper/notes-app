@@ -27,7 +27,7 @@ const firstDay = () => { try { const l = new Intl.Locale(navigator.language), w 
 const fmtTime = k => I.parseKey(k).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 const ym = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 const uid = () => 'e' + Math.random().toString(36).slice(2, 10);
-const BLOCK = 26, PHONE = matchMedia('(max-width: 640px)');
+const BLOCK = 26, MAXW = BLOCK * 8, PHONE = matchMedia('(max-width: 640px)');
 
 const sig = () => [FILE, FD.LINKS, ...FD.feeds().map(f => `${FD.DIR}${f.n}.ics`)].map(p => M.files.get(p)?.sha || '').join();
 
@@ -167,7 +167,15 @@ export function initCalendar(root, { openSettings }) {
     const add = Array.from({ length: BLOCK }, (_, i) => i);
     if (up) { first = I.addDays(first, -BLOCK * 7); nWeeks += BLOCK; gather(); weeksEl.prepend(...add.map(weekRow)); scroller.scrollTop += BLOCK * wk; }
     else { const n0 = nWeeks; nWeeks += BLOCK; gather(); weeksEl.append(...add.map(i => weekRow(n0 + i))); }
+    if (nWeeks > MAXW) trim(up);
     clearTimeout(ensureT); ensureT = setTimeout(() => ensure(), 150);
+  }
+  /** Keeps the page light however far you scroll: drops a block of weeks on the side you scrolled away from. */
+  function trim(up) {
+    const kids = weeksEl.children;
+    if (up) for (let i = 0; i < BLOCK; i++) kids[kids.length - 1].remove();
+    else { for (let i = 0; i < BLOCK; i++) kids[0].remove(); first = I.addDays(first, BLOCK * 7); scroller.scrollTop -= BLOCK * wk; }
+    nWeeks -= BLOCK; gather();
   }
   function setWindow(around) { first = I.addDays(weekStart(around), -20 * 7); nWeeks = BLOCK * 3; }
   const rowOf = d => Math.round((weekStart(d) - first) / 604800000);

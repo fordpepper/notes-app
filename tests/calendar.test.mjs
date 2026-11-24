@@ -111,6 +111,9 @@ await scroll(-wkh * 400, true); await p.waitForTimeout(400);
 const rowsBefore = await p.locator('#cal .wk').count();
 await scroll(0); await p.waitForTimeout(400);
 ok('scrolling far up also extends upward', await p.locator('#cal .wk').count() > rowsBefore && await p.evaluate(() => document.querySelector('.cal-scroll').scrollTop) > wkh);
+for (let i = 0; i < 14; i++) { await scroll(wkh * 40, true); await p.waitForTimeout(120); }
+ok('scrolling for years keeps the page light (old weeks are dropped) and the view does not jump', await p.locator('#cal .wk').count() <= 26 * 8 && await p.evaluate(() => { const s = document.querySelector('.cal-scroll'); return s.scrollTop > 0 && s.scrollTop < s.scrollHeight - s.clientHeight; }));
+await p.click('#cal .cal-head button:has-text("Today")'); await p.waitForTimeout(500);
 await p.click('#cal .cal-head button:has-text("Today")'); await p.waitForTimeout(1800);
 ok('Today scrolls back', (await title(p)).toLowerCase().includes(monthName(now)));
 await p.evaluate(() => document.querySelector('.cal-scroll').focus()); await p.keyboard.press('ArrowDown');
@@ -219,12 +222,11 @@ const [fc2] = await Promise.all([nd.p.waitForEvent('filechooser'), nd.p.click('d
 await nd.p.waitForSelector('dialog:has(h3:text("Import settings"))');
 await nd.p.fill('dialog:has(h3:text("Import settings")) input[type=password]', 'correct horse battery'); await nd.p.click('dialog:has(h3:text("Import settings")) .primary');
 await nd.p.click('dialog:has(h3:text("Replace settings on this device?")) .primary');
-await nd.p.waitForSelector('.row.file', { timeout: 15000 });
+await nd.p.waitForSelector('dialog.full .acct:has(b:text-is("me@gmail.com"))', { timeout: 15000 }); await nd.p.waitForSelector('.row.file', { timeout: 15000 });
 const after = await nd.p.evaluate(() => ({ cfg: JSON.parse(localStorage.cfg), pal: JSON.parse(localStorage.prefs).palette, g: JSON.parse(localStorage.gcal) }));
 ok('import restores repo, token, colours and Google accounts on the new device', after.cfg.owner === 'me' && after.cfg.token === 'ghp_secret_value_123' && after.pal === 'violet' && after.g.clientId.startsWith('test-client') && after.g.accounts.map(a => a.email).sort().join() === 'me@gmail.com', JSON.stringify(after.g));
 ok('notes sync straight away from the same repo', (await nd.p.locator('.row.file .name').allInnerTexts()).includes('Notes'));
-await settings(nd.p);
-ok('accounts come back as "sign in" (access tokens are never exported)', await nd.p.locator('.acct:has(b:text-is("me@gmail.com")) button:has-text("Sign in")').count() === 1);
+ok('imported accounts sign themselves in (no Sign in button to press), tokens were never exported', await nd.p.locator('.acct:has(b:text-is("me@gmail.com")) button:has-text("Sign in")').count() === 0 && await nd.p.locator('.acct:has(b:text-is("me@gmail.com")) small:text("connected")').count() === 1 && authLog.some(l => l.startsWith('|me@gmail.com|token')) && !/tok-1/.test(vault), authLog.join(' ; '));
 // import an .ics file (e.g. from Apple Calendar)
 const appleIcs = `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:apple-1@icloud\r\nDTSTART:${ymd(day(20), 14)}\r\nDTEND:${ymd(day(20), 15)}\r\nSUMMARY:From Apple\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`;
 const icsPath = path.join(SHOTS, 'apple.ics'); fs.writeFileSync(icsPath, appleIcs);

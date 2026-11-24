@@ -419,7 +419,7 @@ body[data-view=calendar] #doc, body[data-view=calendar] #empty, body[data-view=c
 .cal-main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 24px; }
 .cal-grid { min-height: 0; min-width: 0; display: flex; border-radius: var(--r-m) var(--r-m) 0 0; overflow: hidden; box-shadow: 0 0 0 1px var(--line); }
 .cal-scroll { flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden; overflow-anchor: none; overscroll-behavior: contain; outline: none; scrollbar-width: thin; scrollbar-color: var(--line) transparent; background: var(--surface); }
-.wd { position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: repeat(7, 1fr); background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+.wd { position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: repeat(7, 1fr); background: var(--surface); border-bottom: 1px solid var(--line); }
 .wd span { padding: 7px 8px 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: capitalize; }
 .weeks { --wk: 104px; }
 .wk { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); height: var(--wk); contain: strict; }

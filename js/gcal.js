@@ -79,6 +79,18 @@ export function connect(hint) {
   location.assign(url);
   return new Promise(() => {});
 }
+const AUTO = 'gcal-auto';
+/** After importing settings the accounts have no token yet. Signs them in one after the other with no clicks: each visit to Google
+ *  names the account (login_hint) and Google, which already knows this app's permission, sends straight back. Returns true when it leaves the page. */
+export function autoSignIn() {
+  const q = ls.get(AUTO, null);
+  if (!q) return false;
+  const todo = (q.list || []).filter(e => account(e) && !live(account(e)));
+  if (!todo.length || !navigator.onLine || Date.now() - q.t > 600000) { localStorage.removeItem(AUTO); return false; }
+  ls.set(AUTO, { ...q, list: todo.slice(1) });
+  try { connect(todo[0]); } catch { localStorage.removeItem(AUTO); return false; }
+  return true;
+}
 /** Call once at startup: when the page was opened by Google's redirect, takes the token from the address. Resolves to {email} or {error}, or null. */
 export async function finishSignIn() {
   if (!/[#&](access_token|error)=/.test(location.hash)) return null;
@@ -86,6 +98,7 @@ export async function finishSignIn() {
   history.replaceState(null, '', location.pathname + location.search);
   if (!pend || pend.state !== r.state || Date.now() - pend.t > 1800000) return null;
   localStorage.removeItem(PEND);
+  if (r.error || !r.token) localStorage.removeItem(AUTO);
   if (r.error || !r.token) return { error: r.error === 'access_denied' ? 'Sign-in was cancelled.' : `Google sign-in failed (${r.error || 'no token'}).` };
   try { return { email: await addFromToken(r, pend.hint) }; } catch (e) { return { error: e.message }; }
 }
@@ -118,7 +131,7 @@ export const setCalendarOn = (email, id, on) => patchAccount(email, a => ({ ...a
 
 /** What gets exported: no access tokens, they expire in an hour anyway. */
 export const exportState = () => { const s = read(); return { clientId: s.clientId, accounts: s.accounts.map(a => ({ email: a.email, calendars: a.calendars })) }; };
-export const importState = o => write({ clientId: o?.clientId || '', accounts: (o?.accounts || []).map(a => ({ email: a.email, token: '', exp: 0, calendars: a.calendars || [] })) });
+export const importState = o => { const e = (o?.accounts || []).map(a => a.email); if (e.length) ls.set(AUTO, { list: e, t: Date.now() }); return write({ clientId: o?.clientId || '', accounts: (o?.accounts || []).map(a => ({ email: a.email, token: '', exp: 0, calendars: a.calendars || [] })) }); };
 
 const norm = (it, cal, email) => {
   const allDay = !!it.start?.date, start = allDay ? it.start.date : tkey(new Date(it.start.dateTime)), end = allDay ? it.end.date : tkey(new Date(it.end.dateTime));
